@@ -49,7 +49,7 @@ These are agreed goals, not implemented or verified features. Confirm technical 
 - Initial scaffold committed: Kotlin + Jetpack Compose, Gradle Kotlin DSL configuration, Android manifest, a bike-assistant home screen, an explicit three-phase roadmap model, unit tests, README, .gitignore, and a GitHub Actions build/test/APK-artifact workflow.
 - Current UI is a prototype shell only. Microphone, wake-word detection, music control, Google Maps navigation, and Bluetooth headset integration are not implemented yet.
 - No successful Android build, automated test run, APK generation, installation, or real-device verification is confirmed yet.
-- Local build verification was attempted by cloning the repository, but this environment could not resolve github.com (network/DNS unavailable). GitHub Actions currently reports zero workflow runs, so CI results are not yet available.
+- Local build verification was attempted by cloning the repository, but this environment could not resolve github.com (network/DNS unavailable). GitHub Actions has now started build/test workflow runs for the scaffold commits. At the latest check, runs were still in progress and no pass/fail conclusion was available yet.
 - The phased bike-assistant-to-general-assistant roadmap is recorded here and in README.md.
 
 ## Handoff checklist
