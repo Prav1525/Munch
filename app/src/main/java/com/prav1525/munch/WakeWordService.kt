@@ -570,9 +570,8 @@ class WakeWordService : Service() {
         runCatching { wakeTts?.stop() }
         runCatching { wakeTts?.shutdown() }
         wakeTts = null
-        runCatching { wakeDetector?.stop() }
-        runCatching { wakeDetector?.release() }
-        wakeDetector = null
+        stopWakeDetector(releaseResources = true)
+        detectorScope.cancel()
         dedicatedDetectorActive = false
         mediaSession?.isActive = false
         mediaSession?.release()
