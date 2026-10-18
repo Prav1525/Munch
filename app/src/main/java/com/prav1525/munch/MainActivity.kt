@@ -686,6 +686,24 @@ private fun runAssistantRequest(
                 setStatus(answer); activity.speak(answer)
             }
         }
+        Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val match = Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
+            val query = match.groupValues[1].trim()
+            if (!SpotifyAgent.isConnected(context)) {
+                val answer = "Spotify is not connected to Munch yet. Connect it in Settings, then ask me to play $query on Spotify."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            } else {
+                setBusy(true)
+                setStatus("Finding $query on Spotify…")
+                SpotifyAgent.searchAndPlay(context, query) { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "I couldn't start $query on Spotify: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            }
+        }
         Regex("^play\\s+(.+?)\\s+on\\s+youtube[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val match = Regex("^play\\s+(.+?)\\s+on\\s+youtube[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
             val query = match.groupValues[1].trim()
