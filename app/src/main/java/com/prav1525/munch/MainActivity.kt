@@ -424,7 +424,7 @@ private fun MunchHome(activity: MainActivity) {
                             }
                         })
                     }
-                    Text("Wake-word detection uses Android speech recognition and may require network access; it is not a guaranteed offline keyword engine. Android may stop microphone access under battery or background restrictions.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Current wake listening still uses Android speech recognition. A true low-power offline “Hey Munch” detector needs a compatible trained model file; that model is not bundled yet. The headset/call/play button is a push-to-talk fallback while Munch is open. Android battery and background restrictions can still affect listening.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Free Groq limits and availability can change. If a request fails or times out, Munch returns its offline response instead of waiting indefinitely.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
                     TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
