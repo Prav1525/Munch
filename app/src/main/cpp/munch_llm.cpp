@@ -56,10 +56,10 @@ Java_com_prav1525_munch_LocalLlmNative_generate(JNIEnv *env, jobject, jstring pr
     if (!g_model || !g_context || !g_sampler) return env->NewStringUTF("");
     const std::string prompt = from_jstring(env, promptValue);
     const llama_vocab *vocab = llama_model_get_vocab(g_model);
-    const int required = -llama_tokenize(vocab, prompt.c_str(), (int)prompt.size(), nullptr, 0, true, true);
+    const int required = -llama_tokenize(vocab, prompt.c_str(), (int)prompt.size(), nullptr, 0, false, true);
     if (required <= 0 || required > 8192) return env->NewStringUTF("");
     std::vector<llama_token> tokens((size_t)required);
-    const int token_count = llama_tokenize(vocab, prompt.c_str(), (int)prompt.size(), tokens.data(), (int)tokens.size(), true, true);
+    const int token_count = llama_tokenize(vocab, prompt.c_str(), (int)prompt.size(), tokens.data(), (int)tokens.size(), false, true);
     if (token_count <= 0) return env->NewStringUTF("");
     tokens.resize((size_t)token_count);
 
