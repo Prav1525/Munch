@@ -390,6 +390,20 @@ object AssistantServices {
         }.getOrDefault(false)
     }
 
+    /** Opens YouTube search results for a spoken title; Android/YouTube may require a tap to start playback. */
+    fun searchYouTube(context: Context, query: String): Boolean {
+        val clean = query.trim()
+        if (clean.isBlank()) return openExternalApp(context, "youtube")
+        val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        val uri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(clean))
+        val appIntent = Intent(Intent.ACTION_VIEW, uri).setPackage("com.google.android.youtube").addFlags(flags)
+        if (runCatching { context.startActivity(appIntent); true }.getOrDefault(false)) return true
+        return runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(flags))
+            true
+        }.getOrDefault(false)
+    }
+
     /** Opens a search for the requested track/artist in a music app or browser. Playback depends on that app. */
     fun searchMusic(context: Context, query: String): Boolean {
         val clean = query.trim()
