@@ -113,3 +113,10 @@
 - The trained `hey_munch.onnx` model is not yet present. Therefore this is integration scaffolding only; the custom detector will not activate until a compatible model is trained and added to app assets. The existing speech fallback remains the active path meanwhile.
 - The Android port expects a compatible openWakeWord ONNX classifier with input shape `[1, 16, 96]` and output shape `[1, 1]`. Validate the actual model's compatibility and license before bundling it. Built-in pretrained models in the dependency have separate CC BY-NC-SA 4.0 terms.
 - Still required: train/create the custom model, add it as `app/src/main/assets/hey_munch.onnx`, rerun CI and inspect the APK, then test on the user's phone. Physical-device microphone, false-trigger, screen-off, battery, and noisy-environment tests are not yet done.
+
+## Wake speech error recovery fix (2026-10-18)
+- Updated `WakeWordService.kt` to explicitly identify Android speech-recognition error 11 (provider disconnected) and error 13 (language unavailable), plus language-not-supported errors.
+- On these provider/language failures, the service now switches from the on-device en-IN recognizer to the system recognizer with en-US and permits the system's normal online route if needed, rather than retrying the same failing recognizer indefinitely.
+- Commit: `5d1b991270b6d594f63939942e29b6b120962d41`.
+- GitHub Actions run 112 passed `gradle --no-daemon testDebugUnitTest assembleDebug` and uploaded artifact `munch-debug-apk`. APK size: 79,730,563 bytes; SHA-256: `96110b19c1d5b47e3e1968f69029380858cff2dd07991f1b94ef26830502f93e`. Artifact ZIP integrity check passed.
+- This is a code/build fix, not a physical-device confirmation. Still required on the user's phone: test wake listening with screen on/off, verify whether error 11/13 no longer repeats, test the headset button, and test YouTube Music with and without an existing queue. The built-in “Hey Jarvis” model is still the temporary detector until a compatible custom `hey_munch.onnx` model is bundled.
