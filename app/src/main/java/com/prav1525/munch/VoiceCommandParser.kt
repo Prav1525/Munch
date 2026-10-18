@@ -24,9 +24,23 @@ object VoiceCommandParser {
             .trim()
     }
 
+    /** Recognizes app-level music commands separately from requests for a specific track. */
+    fun isMusicAppCommand(raw: String): Boolean {
+        val command = stripWakePhrase(raw)
+            .lowercase()
+            .replace(Regex("[.!?]+$"), "")
+            .trim()
+        return command in setOf(
+            "play music", "resume music", "continue music",
+            "play youtube music", "open youtube music", "launch youtube music",
+            "open yt music", "play yt music", "resume youtube music"
+        )
+    }
+
     /** Extracts a non-empty play request for YouTube; unrelated commands return null. */
     fun youtubePlayQuery(raw: String): String? {
         val command = stripWakePhrase(raw)
+        if (isMusicAppCommand(command)) return null
         val match = youtubePlay.matchEntire(command) ?: return null
         return match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
     }
