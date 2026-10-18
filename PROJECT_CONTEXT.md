@@ -59,3 +59,13 @@
 - Artifact upload: passed; artifact was downloaded and ZIP contents and APK file size were checked locally.
 - Real-device microphone, Gemini API call, Bluetooth headset, reminder notification, Google Maps, and wake-phrase tests have not been performed.
 - Next work: implement/test a privacy-conscious on-device wake phrase strategy and practical media-session controls; consider moving Gemini requests behind a secure backend before any public distribution.
+
+
+## Offline-first update (2026-10-18)
+- User chose a free/offline-first assistant and asked to remove dependency on Gemini API calls.
+- Added `OfflineAssistant.kt` with deterministic local replies for greetings, time/date, help, identity, thanks, and a joke; unknown prompts receive a concise, honest offline-limit response.
+- Updated `MainActivity.kt` so general conversation prompts use the local responder and speak the response. Existing local command routing for music launch, Maps handoff, and reminders remains in place. Removed the Gemini API key field from Settings and replaced it with an offline-mode explanation.
+- Added `OfflineAssistantTest.kt` unit tests for greetings, help, time responses, and honest handling of unsupported questions.
+- Important limitation: this change does NOT bundle a full local language model. General free-form AI quality is limited. Android Gemini Nano/ML Kit GenAI is free of per-request cloud inference costs but only works on supported devices and may require model setup/download; it is not assumed to work on every phone. A future model integration must check runtime availability and preserve deterministic offline fallback.
+- Maps navigation and Android speech recognition can still rely on installed apps, device speech services, or internet depending on device/settings. Do not promise every feature works without internet.
+- Build and tests must be confirmed from the latest GitHub Actions run before delivering an APK.
