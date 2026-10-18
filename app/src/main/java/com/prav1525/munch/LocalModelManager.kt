@@ -1,6 +1,7 @@
 package com.prav1525.munch
 
 import android.content.Context
+import android.net.Uri
 import android.os.PowerManager
 import java.io.File
 import java.io.FileOutputStream
@@ -22,6 +23,43 @@ object LocalModelManager {
     fun modelFile(context: Context): File = File(context.filesDir, MODEL_FILE)
     fun isDownloaded(context: Context): Boolean =
         modelFile(context).let { it.exists() && it.length() > 1_000_000_000L }
+
+    /** Copies a user-selected GGUF into app-private storage so it remains available after restart. */
+    fun importModel(context: Context, uri: Uri, onProgress: (String) -> Unit, onComplete: (Result<File>) -> Unit) {
+        executor.execute {
+            val target = modelFile(context)
+            val temporary = File(context.filesDir, "${MODEL_FILE}.importing")
+            try {
+                onProgress("Copying model from device storage…")
+                context.contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "Could not open the selected file." }
+                    FileOutputStream(temporary, false).use { output ->
+                        val buffer = ByteArray(128 * 1024)
+                        var copied = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            copied += count
+                            if (copied > 0 && copied % (256L * 1024 * 1024) < buffer.size) {
+                                onProgress("Copying model: ${copied / (1024 * 1024)} MB")
+                            }
+                        }
+                        output.fd.sync()
+                    }
+                }
+                require(temporary.length() > 1_000_000_000L) {
+                    "That file is too small to be a complete GGUF model. Choose a large .gguf file."
+                }
+                if (target.exists() && !target.delete()) throw IllegalStateException("Could not replace the existing model.")
+                if (!temporary.renameTo(target)) throw IllegalStateException("Could not save the imported model.")
+                onComplete(Result.success(target))
+            } catch (error: Exception) {
+                temporary.delete()
+                onComplete(Result.failure(error))
+            }
+        }
+    }
 
     fun download(context: Context, onProgress: (String) -> Unit, onComplete: (Result<File>) -> Unit) {
         executor.execute {
