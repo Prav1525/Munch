@@ -101,3 +101,15 @@
 - Implemented: Groq primary for open-ended prompts when the user has entered a key and online AI is enabled (online AI now defaults enabled); deterministic offline fallback; direct command routing for Maps/reminders/music/app launching; app-name lookup; music search; optional foreground “Hey Munch” listener.
 - Not verified on a physical phone: wake-word reliability with the screen off, background microphone policy, battery impact, actual track autoplay, Bluetooth/helmet audio, or third-party app behavior. “Play [song]” opens a music search and does not guarantee automatic playback. The fallback is the deterministic OfflineAssistant, not a confirmed GGUF local LLM.
 - Release next steps: install the APK on the user's phone, enter their own Groq API key in Settings, test app launch/music/search and wake phrase under real conditions, and only then consider a release build. Do not claim the wake phrase is guaranteed always-on or fully offline.
+
+
+## Dedicated wake-word detector integration (2026-10-18)
+- User approved the offline custom “Hey Munch” wake-word approach.
+- Added JitPack to dependency resolution and added `com.github.msnilsen:openwakeword-android:0.1.0`.
+- Updated `WakeWordService.kt` to load `app/src/main/assets/hey_munch.onnx` when present, using the dedicated local detector and handing off to MainActivity on detection. If the model is absent or fails to load, it keeps the existing speech-recognition fallback and labels the notification accordingly.
+- Commits: `792210d21e3d3464ebd1183f22b82ddd45d9cb7f` (JitPack repository), `e6df14d2e84888fbd25a22002b81ecd8ade46c63` (dependency), `7e75e836ad95b570831ca38314cc07dac417bf76` (service integration).
+- CI run #96 passed compile/tests/APK assembly and artifact upload for the dependency-only commit: https://github.com/Prav1525/Munch/actions/runs/39121539447.
+- CI run #97 for the full detector service integration is still in progress at the time of this note: https://github.com/Prav1525/Munch/actions/runs/39121567925. Do not distribute an APK until this run succeeds and its artifact is inspected.
+- The trained `hey_munch.onnx` model is not yet present. Therefore this is integration scaffolding only; the custom detector will not activate until a compatible model is trained and added to app assets. The existing speech fallback remains the active path meanwhile.
+- The Android port expects a compatible openWakeWord ONNX classifier with input shape `[1, 16, 96]` and output shape `[1, 1]`. Validate the actual model's compatibility and license before bundling it. Built-in pretrained models in the dependency have separate CC BY-NC-SA 4.0 terms.
+- Still required: train/create the custom model, add it as `app/src/main/assets/hey_munch.onnx`, rerun CI and inspect the APK, then test on the user's phone. Physical-device microphone, false-trigger, screen-off, battery, and noisy-environment tests are not yet done.
