@@ -552,16 +552,41 @@ private fun runAssistantRequest(
             val match = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
             val requestedSong = match.groupValues.getOrElse(1) { "" }.trim().trimEnd('.', '!', '?')
             val genericSongRequest = requestedSong.lowercase(Locale.ROOT) in setOf("a song", "some music", "music", "a music", "song")
-            val opened = if (requestedSong.isNotBlank() && !genericSongRequest) AssistantServices.searchYouTube(context, requestedSong)
-                else AssistantServices.openExternalApp(context, "youtube")
-            val answer = when {
-                !opened -> "I couldn't open YouTube. Please check that YouTube is installed."
-                requestedSong.isNotBlank() && !genericSongRequest -> "Opening YouTube results for $requestedSong. Tap the matching result to play it."
-                requestedSong.isNotBlank() -> "Opening YouTube. Tell me the song title or artist and I'll search for it."
-                else -> "Opening YouTube."
+            if (requestedSong.isNotBlank() && !genericSongRequest) {
+                setBusy(true)
+                setStatus("Finding a playable YouTube result for $requestedSong…")
+                AssistantServices.playYouTubeSearch(context, requestedSong) { opened, autoPlay ->
+                    setBusy(false)
+                    val answer = when {
+                        !opened -> "I couldn't open YouTube. Please check that YouTube is installed."
+                        autoPlay -> "Playing $requestedSong on YouTube."
+                        else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
+                    }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+                val opened = AssistantServices.openExternalApp(context, "youtube")
+                val answer = if (opened) "Opening YouTube." else "I couldn't open YouTube. Please check that YouTube is installed."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
             }
-            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
-            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^play\\s+(.+?)\\s+on\\s+youtube[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val match = Regex("^play\\s+(.+?)\\s+on\\s+youtube[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
+            val query = match.groupValues[1].trim()
+            setBusy(true)
+            setStatus("Finding a playable YouTube result for $query…")
+            AssistantServices.playYouTubeSearch(context, query) { opened, autoPlay ->
+                setBusy(false)
+                val answer = when {
+                    !opened -> "I couldn't open YouTube."
+                    autoPlay -> "Playing $query on YouTube."
+                    else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
+                }
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            }
         }
         Regex("^play\\s+(youtube music|yt music|ytmusic)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val opened = AssistantServices.openMusicAndResume(context)
@@ -602,10 +627,18 @@ private fun runAssistantRequest(
         Regex("^play\\s+(.+)$", RegexOption.IGNORE_CASE).matches(prompt.trim()) &&
             !lower.matches(Regex("^play\\s+(music|my music|some music|the music)[.! ]*$")) -> {
             val query = prompt.trim().replaceFirst(Regex("^play\\s+", RegexOption.IGNORE_CASE), "").trim().trimEnd('.', '!')
-            val opened = AssistantServices.searchMusic(context, query)
-            val answer = if (opened) "Searching your music for $query." else "I couldn't open a music search for $query."
-            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
-            setStatus(answer); activity.speak(answer)
+            setBusy(true)
+            setStatus("Finding a playable YouTube result for $query…")
+            AssistantServices.playYouTubeSearch(context, query) { opened, autoPlay ->
+                setBusy(false)
+                val answer = when {
+                    !opened -> "I couldn't open YouTube. Please check your connection."
+                    autoPlay -> "Playing $query on YouTube."
+                    else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
+                }
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            }
         }
         lower.contains("play music") || lower == "music" || lower.contains("open music") -> {
             AssistantServices.openMusic(context)
