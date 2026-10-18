@@ -505,6 +505,17 @@ private fun runAssistantRequest(
     clearPrompt()
     val lower = prompt.lowercase(Locale.ROOT)
     when {
+        Regex("^(open|launch|start)\\s+(youtube music|yt music)(?:\\s+and\\s+play\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val match = Regex("^(open|launch|start)\\s+(youtube music|yt music)(?:\\s+and\\s+play\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
+            val song = match.groupValues.getOrElse(3) { "" }.trim().trimEnd('.', '!')
+            val opened = if (song.isNotBlank()) AssistantServices.searchMusic(context, song)
+                else AssistantServices.openExternalApp(context, "youtube music")
+            val answer = if (opened && song.isNotBlank()) "Searching YouTube Music for $song."
+                else if (opened) "Opening YouTube Music."
+                else "I couldn't open YouTube Music or its web player."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
         lower.startsWith("navigate to ") || lower.startsWith("take me to ") || lower.startsWith("directions to ") -> {
             val destination = prompt.substringAfter(" to ", "").trim()
             if (destination.isNotBlank()) {
