@@ -441,43 +441,56 @@ object AssistantServices {
         }
 
         io.execute {
+            // YouTube serves different markup (and sometimes different failures) from its
+            // desktop and mobile search endpoints. Try both before falling back to a results
+            // page, and prefer a videoRenderer ID over an arbitrary embedded video ID.
             val videoId = runCatching {
-                val url = URL("https://www.youtube.com/results?search_query=" + Uri.encode(searchText))
-                val connection = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 4500
-                    readTimeout = 6000
-                    instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36")
-                    setRequestProperty("Accept-Language", "en-IN,en;q=0.9,ta;q=0.8")
-                    setRequestProperty("Accept", "text/html,application/xhtml+xml")
-                }
-                try {
-                    if (connection.responseCode !in 200..299) null
-                    else {
-                        // Bound memory use and tolerate whitespace/format changes in YouTube's JSON.
-                        val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                            val out = StringBuilder()
-                            val buffer = CharArray(8192)
-                            var total = 0
-                            while (total < 2_000_000) {
-                                val count = reader.read(buffer, 0, minOf(buffer.size, 2_000_000 - total))
-                                if (count < 0) break
-                                out.append(buffer, 0, count)
-                                total += count
-                            }
-                            out.toString()
+                val encodedQuery = Uri.encode(searchText)
+                val endpoints = listOf(
+                    "https://www.youtube.com/results?search_query=" + encodedQuery,
+                    "https://m.youtube.com/results?search_query=" + encodedQuery
+                )
+                for (endpoint in endpoints) {
+                    val resolved = runCatching {
+                        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 3_000
+                            readTimeout = 4_000
+                            instanceFollowRedirects = true
+                            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36")
+                            setRequestProperty("Accept-Language", "en-IN,en;q=0.9,ta;q=0.8")
+                            setRequestProperty("Accept", "text/html,application/xhtml+xml")
                         }
-                        val rendererId = Regex(
-                            """"videoRenderer"\s*:\s*\{[\s\S]{0,16000}?"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
-                        ).find(html)?.groupValues?.getOrNull(1)
-                        rendererId ?: Regex(
-                            """"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
-                        ).find(html)?.groupValues?.getOrNull(1)
-                    }
-                } finally {
-                    connection.disconnect()
+                        try {
+                            if (connection.responseCode !in 200..299) null
+                            else {
+                                // Bound memory use: search pages can be several MB on mobile.
+                                val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                                    val out = StringBuilder()
+                                    val buffer = CharArray(8192)
+                                    var total = 0
+                                    while (total < 2_000_000) {
+                                        val count = reader.read(buffer, 0, minOf(buffer.size, 2_000_000 - total))
+                                        if (count < 0) break
+                                        out.append(buffer, 0, count)
+                                        total += count
+                                    }
+                                    out.toString()
+                                }
+                                val rendererId = Regex(
+                                    """"videoRenderer"\s*:\s*\{[\s\S]{0,16000}?"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
+                                ).find(html)?.groupValues?.getOrNull(1)
+                                rendererId ?: Regex(
+                                    """"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
+                                ).find(html)?.groupValues?.getOrNull(1)
+                            }
+                        } finally {
+                            connection.disconnect()
+                        }
+                    }.getOrNull()
+                    if (!resolved.isNullOrBlank()) return@runCatching resolved
                 }
+                null
             }.getOrNull()
 
             Handler(Looper.getMainLooper()).post {
