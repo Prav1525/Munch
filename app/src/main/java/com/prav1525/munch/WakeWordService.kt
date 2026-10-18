@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.Manifest
 import android.content.Intent
+import android.media.AudioManager
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -162,9 +163,15 @@ class WakeWordService : Service() {
             detector.start { score ->
                 // The detector callback may run on its audio thread. Serialize state changes
                 // and SpeechRecognizer handoff on the main thread, and guard duplicate triggers.
-                if (score >= WAKE_THRESHOLD) {
+                // Media lyrics and music can resemble the wake phrase. Raise the
+                // acceptance threshold while Android reports active media playback.
+                val mediaActive = runCatching {
+                    (getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager).isMusicActive
+                }.getOrDefault(false)
+                val requiredScore = if (mediaActive) MUSIC_WAKE_THRESHOLD else WAKE_THRESHOLD
+                if (score >= requiredScore) {
                     mainHandler.post {
-                        if (dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
+                        if (dedicatedDetectorActive && !handlingWake && !awaitingCommand && !speakingResponse) {
                             handleDedicatedWake()
                         }
                     }
@@ -639,5 +646,6 @@ class WakeWordService : Service() {
                 private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
         private const val WAKE_THRESHOLD = 0.55f
+        private const val MUSIC_WAKE_THRESHOLD = 0.76f
     }
 }
