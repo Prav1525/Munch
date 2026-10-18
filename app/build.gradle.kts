@@ -44,8 +44,6 @@ android {
     }
 }
 
-import java.net.URL
-
 val downloadHeyJarvisWakeModel = tasks.register("downloadHeyJarvisWakeModel") {
     val modelFile = layout.buildDirectory.file("generated/wakeword-assets/hey_jarvis_v0.1.onnx")
     outputs.file(modelFile)
@@ -53,7 +51,7 @@ val downloadHeyJarvisWakeModel = tasks.register("downloadHeyJarvisWakeModel") {
         val destination = modelFile.get().asFile
         if (!destination.exists()) {
             destination.parentFile.mkdirs()
-            URL("https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx")
+            java.net.URL("https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx")
                 .openStream().use { input ->
                     destination.outputStream().use { output -> input.copyTo(output) }
                 }
