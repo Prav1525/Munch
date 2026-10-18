@@ -48,7 +48,7 @@ object AssistantServices {
     fun askGroq(context: Context, prompt: String, callback: (Result<String>) -> Unit) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val key = prefs.getString(GROQ_API_KEY, "").orEmpty()
-        if (!prefs.getBoolean(GROQ_FALLBACK_ENABLED, false) || key.isBlank()) {
+        if (!prefs.getBoolean(GROQ_FALLBACK_ENABLED, true) || key.isBlank()) {
             callback(Result.failure(IllegalStateException("Online fallback is disabled or no Groq API key is configured.")))
             return
         }
