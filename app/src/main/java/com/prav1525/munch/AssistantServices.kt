@@ -13,6 +13,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import java.time.LocalDate
 import java.util.concurrent.Executors
 
 /**
@@ -27,6 +28,41 @@ object AssistantServices {
     private const val API_KEY = "gemini_api_key"
     private const val GROQ_API_KEY = "groq_api_key"
     private const val GROQ_FALLBACK_ENABLED = "groq_fallback_enabled"
+    private const val API_CALLS_DATE = "api_calls_date"
+    private const val API_CALLS_TOTAL = "api_calls_total"
+    private const val API_CALLS_GROQ = "api_calls_groq"
+    private const val API_CALLS_GEMINI = "api_calls_gemini"
+
+    /** Counts outbound AI HTTP request attempts per local calendar day, including retries/failures. */
+    @Synchronized
+    private fun recordApiCall(context: Context, provider: String) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val today = LocalDate.now().toString()
+        val sameDay = prefs.getString(API_CALLS_DATE, "") == today
+        val total = if (sameDay) prefs.getInt(API_CALLS_TOTAL, 0) else 0
+        val groq = if (sameDay) prefs.getInt(API_CALLS_GROQ, 0) else 0
+        val gemini = if (sameDay) prefs.getInt(API_CALLS_GEMINI, 0) else 0
+        prefs.edit()
+            .putString(API_CALLS_DATE, today)
+            .putInt(API_CALLS_TOTAL, total + 1)
+            .putInt(API_CALLS_GROQ, groq + if (provider == "groq") 1 else 0)
+            .putInt(API_CALLS_GEMINI, gemini + if (provider == "gemini") 1 else 0)
+            .apply()
+    }
+
+    private fun apiCallStats(context: Context): Triple<Int, Int, Int> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString(API_CALLS_DATE, "") != LocalDate.now().toString()) return Triple(0, 0, 0)
+        return Triple(
+            prefs.getInt(API_CALLS_TOTAL, 0),
+            prefs.getInt(API_CALLS_GROQ, 0),
+            prefs.getInt(API_CALLS_GEMINI, 0)
+        )
+    }
+
+    fun getApiCallsToday(context: Context): Int = apiCallStats(context).first
+    fun getGroqApiCallsToday(context: Context): Int = apiCallStats(context).second
+    fun getGeminiApiCallsToday(context: Context): Int = apiCallStats(context).third
 
     fun getGroqApiKey(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(GROQ_API_KEY, "").orEmpty()
@@ -54,6 +90,7 @@ object AssistantServices {
         }
         io.execute {
             val result = runCatching {
+                recordApiCall(context, "groq")
                 val endpoint = URL("https://api.groq.com/openai/v1/chat/completions")
                 val connection = (endpoint.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
@@ -125,6 +162,7 @@ object AssistantServices {
                 var lastError: String? = null
 
                 for (model in models) {
+                    recordApiCall(context, "gemini")
                     val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
                     val connection = (endpoint.openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
