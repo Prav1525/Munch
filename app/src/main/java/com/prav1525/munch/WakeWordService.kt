@@ -129,6 +129,13 @@ class WakeWordService : Service() {
             return
         }
 
+        // Reuse the initialized ONNX sessions after a wake event. Releasing the detector
+        // on every command would unnecessarily reload several models and may close ORT state.
+        if (wakeDetector != null) {
+            startExistingWakeDetector()
+            return
+        }
+
         try {
             recognizer?.cancel()
             recognizer?.destroy()
@@ -170,10 +177,10 @@ class WakeWordService : Service() {
                     throw cancelled
                 } catch (failure: Exception) {
                     mainHandler.post {
-                        if (dedicatedDetectorActive && !isDestroyed) {
+                        if (dedicatedDetectorActive) {
                             dedicatedDetectorActive = false
                             forceSpeechFallback = true
-                            stopWakeDetector()
+                            stopWakeDetector(releaseResources = true)
                             updateNotification("Wake detector failed — using speech fallback")
                             startSpeechRecognition()
                         }
@@ -190,12 +197,37 @@ class WakeWordService : Service() {
         startSpeechRecognition()
     }
 
-    private fun stopWakeDetector() {
+    private fun startExistingWakeDetector() {
+        val detector = wakeDetector ?: return
+        dedicatedDetectorActive = true
+        updateNotification("Offline wake detector active — noise filtering enabled")
+        detectorJob = detectorScope.launch {
+            try {
+                detector.startDetection()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                mainHandler.post {
+                    if (dedicatedDetectorActive) {
+                        dedicatedDetectorActive = false
+                        forceSpeechFallback = true
+                        stopWakeDetector(releaseResources = true)
+                        updateNotification("Wake detector failed — using speech fallback")
+                        startSpeechRecognition()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopWakeDetector(releaseResources: Boolean = false) {
         detectorJob?.cancel()
         detectorJob = null
         runCatching { wakeDetector?.pauseDetection() }
-        runCatching { wakeDetector?.releaseResources() }
-        wakeDetector = null
+        if (releaseResources) {
+            runCatching { wakeDetector?.releaseResources() }
+            wakeDetector = null
+        }
     }
 
     private fun hasCustomWakeModel(): Boolean =
@@ -349,7 +381,6 @@ class WakeWordService : Service() {
         if (handlingWake || awaitingCommand) return
         dedicatedDetectorActive = false
         stopWakeDetector()
-        detectorScope.cancel()
         // Capture the command in the foreground service instead of relying on Android
         // allowing a background service to open an Activity immediately after the wake phrase.
         awaitingCommand = true
