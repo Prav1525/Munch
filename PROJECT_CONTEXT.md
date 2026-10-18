@@ -5,8 +5,15 @@
 - Repository: https://github.com/Prav1525/Munch
 - Default branch: main.
 
-## Product vision
-Munch is an Android voice assistant designed for motorcycle riding, with hands-free interaction as a core goal.
+## Product vision and long-term direction
+Munch starts as a motorcycle/bike assistant and is intentionally designed to grow into a general-purpose assistant over time. This is a core product and architecture decision: build modular capabilities so general-assistant features can be added without rewriting the bike-assistant foundation. Keep riding safety and hands-free interaction central to the first version.
+
+### Phased roadmap
+1. **Phase 1 — Bike assistant MVP:** voice interaction, music controls, Google Maps destination navigation, and Bluetooth neckband microphone/audio support.
+2. **Phase 2 — More capable riding assistant:** improve command handling, support offline voice commands where practical, and investigate reliable background operation within Android restrictions.
+3. **Phase 3 — General assistant:** add broader question answering, everyday tasks, and other assistant capabilities as separate modules.
+
+These phases are a roadmap, not a claim that features already exist. Implement and verify incrementally; do not silently treat planned features as completed.
 
 ## Agreed initial technical direction
 - Android app using Kotlin and Jetpack Compose.
@@ -16,7 +23,7 @@ Munch is an Android voice assistant designed for motorcycle riding, with hands-f
 - Voice-based destination requests that open Google Maps navigation.
 - Use the user's OnePlus Bluetooth neckband for microphone and audio when connected.
 - Investigate a foreground service for background listening, respecting Android platform restrictions, permissions, battery use, and privacy.
-- Calls and broader general-assistant capabilities are future modules, not claims about existing functionality.
+- Calls and broader general-assistant capabilities belong to later phases and must be added as separate modules, not treated as existing functionality.
 
 These are agreed goals, not implemented or verified features. Confirm technical feasibility as implementation proceeds; explain platform limits instead of promising unsupported always-on behavior.
 
@@ -40,7 +47,7 @@ These are agreed goals, not implemented or verified features. Confirm technical 
 - PROJECT_CONTEXT.md exists on the main branch.
 - The earlier repository inspection reported the repository empty; current Android source/build configuration has not yet been confirmed in this context.
 - No successful Android build, automated test run, APK generation, installation, or real-device verification is confirmed yet.
-- The product direction and initial feature goals above have been recovered from the prior discussion and recorded here.
+- The product direction, phased bike-assistant-to-general-assistant roadmap, and initial feature goals have been recorded here.
 
 ## Handoff checklist
 1. Fetch this file and inspect the latest repository contents and history.
@@ -50,4 +57,4 @@ These are agreed goals, not implemented or verified features. Confirm technical 
 5. Update this file with verified results and the next concrete step before ending the session.
 
 ## Next step
-Inspect the current repository contents. If there is no Android project, initialize the Kotlin/Jetpack Compose project with a minimal first milestone, then compile and test it. Do not offer an APK until the build succeeds and the verification status is clearly reported.
+Inspect the current repository contents and history. If there is no Android project, initialize the Kotlin/Jetpack Compose project with a minimal, modular bike-assistant MVP. Compile and test it; fix and retest failures. Do not offer an APK until the build succeeds and verification status is clearly reported.
