@@ -549,7 +549,37 @@ private fun runAssistantRequest(
     clearPrompt()
     val lower = prompt.lowercase(Locale.ROOT)
     when {
-        Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+        Regex("^(?:please\\s+)?(?:next|skip)(?:\\s+(?:song|track|music))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val sent = AssistantServices.sendMediaCommand(context, "next")
+            val answer = if (sent) "Sent the next-track command to your active music player. If the track does not change, that app may not expose a controllable media session." else "I could not send the next-track command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^(?:previous|go back|last)(?:\\s+(?:song|track|music))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val sent = AssistantServices.sendMediaCommand(context, "previous")
+            val answer = if (sent) "Sent the previous-track command to your active music player." else "I could not send the previous-track command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^(?:pause|pause music|stop music)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val sent = AssistantServices.sendMediaCommand(context, "pause")
+            val answer = if (sent) "Sent the pause command to your active media player." else "I could not send the pause command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^(?:resume|resume music|continue music|continue playing)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val sent = AssistantServices.sendMediaCommand(context, "resume")
+            val answer = if (sent) "Sent the play command to your active media player." else "I could not send the play command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^(?:play\\s+pause|toggle playback|toggle music)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val sent = AssistantServices.sendMediaCommand(context, "toggle playback")
+            val answer = if (sent) "Sent the playback toggle command." else "I could not toggle playback."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val match = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
             val requestedSong = match.groupValues.getOrElse(1) { "" }.trim().trimEnd('.', '!', '?')
             val genericSongRequest = requestedSong.lowercase(Locale.ROOT) in setOf("a song", "some music", "music", "a music", "song")
@@ -628,18 +658,10 @@ private fun runAssistantRequest(
         Regex("^play\\s+(.+)$", RegexOption.IGNORE_CASE).matches(prompt.trim()) &&
             !lower.matches(Regex("^play\\s+(music|my music|some music|the music)[.! ]*$")) -> {
             val query = prompt.trim().replaceFirst(Regex("^play\\s+", RegexOption.IGNORE_CASE), "").trim().trimEnd('.', '!')
-            setBusy(true)
-            setStatus("Finding a playable YouTube result for $query…")
-            AssistantServices.playYouTubeSearch(context, query) { opened, autoPlay ->
-                setBusy(false)
-                val answer = when {
-                    !opened -> "I couldn't open YouTube. Please check your connection."
-                    autoPlay -> "Opening a YouTube video for $query. Playback depends on YouTube."
-                    else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
-                }
-                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
-                setStatus(answer); activity.speak(answer)
-            }
+            val opened = AssistantServices.searchMusic(context, query)
+            val answer = if (opened) "Opening YouTube Music search for $query. Choose a track to start it; I can send next, previous, pause, and resume commands while a player is active." else "I could not open a music search for $query."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
         }
         lower.contains("play music") || lower == "music" || lower.contains("open music") -> {
             AssistantServices.openMusic(context)
