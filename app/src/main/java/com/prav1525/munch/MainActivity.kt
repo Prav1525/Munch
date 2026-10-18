@@ -553,6 +553,22 @@ private fun runAssistantRequest(
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
         }
+        Regex("^play\\s+(youtube music|yt music|ytmusic)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val opened = AssistantServices.openMusicAndResume(context)
+            val answer = if (opened) "Opening YouTube Music and asking it to resume playback. If nothing is queued, tell me a song or artist."
+                else "I couldn't open YouTube Music."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^play\\s+(.+?)\\s+on\\s+(youtube music|yt music|ytmusic)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val match = Regex("^play\\s+(.+?)\\s+on\\s+(youtube music|yt music|ytmusic)[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
+            val song = match.groupValues[1].trim()
+            val opened = AssistantServices.searchMusic(context, song)
+            val answer = if (opened) "Searching YouTube Music for $song. Tap the track to start playback."
+                else "I couldn't open a music search for $song."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
         Regex("^(open|launch|start)\\s+(youtube music|yt music)(?:\\s+and\\s+play\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val match = Regex("^(open|launch|start)\\s+(youtube music|yt music)(?:\\s+and\\s+play\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
             val song = match.groupValues.getOrElse(3) { "" }.trim().trimEnd('.', '!')
