@@ -244,6 +244,44 @@ object AssistantServices {
         }
     }
 
+    /** Launches an installed launcher activity by its visible app label, e.g. "Spotify". */
+    fun openInstalledApp(context: Context, requestedName: String): Boolean {
+        val requested = requestedName.trim().lowercase(Locale.ROOT)
+        if (requested.isBlank()) return false
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val matches = runCatching { context.packageManager.queryIntentActivities(launcherIntent, 0) }.getOrDefault(emptyList())
+        val target = matches.firstOrNull {
+            it.loadLabel(context.packageManager).toString().trim().lowercase(Locale.ROOT) == requested
+        } ?: matches.firstOrNull {
+            val label = it.loadLabel(context.packageManager).toString().trim().lowercase(Locale.ROOT)
+            label.startsWith(requested) || (requested.length >= 4 && label.contains(requested))
+        } ?: return false
+        val launch = context.packageManager.getLaunchIntentForPackage(target.activityInfo.packageName) ?: return false
+        return runCatching {
+            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Opens a search for the requested track/artist in a music app or browser. Playback depends on that app. */
+    fun searchMusic(context: Context, query: String): Boolean {
+        val clean = query.trim()
+        if (clean.isBlank()) return runCatching { openMusic(context); true }.getOrDefault(false)
+        val uri = Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(clean))
+        val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching {
+            context.startActivity(intent)
+            true
+        }.getOrElse {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW,
+                    Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(clean)))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
+        }
+    }
+
     fun scheduleReminder(context: Context, message: String, triggerAtMillis: Long): Boolean {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) return false
