@@ -10,6 +10,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.view.KeyEvent
+import androidx.media.session.MediaButtonReceiver
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -31,10 +35,46 @@ class WakeWordService : Service() {
     private var listening = false
     private var dedicatedDetectorActive = false
     private var handlingWake = false
+    private var mediaSession: MediaSessionCompat? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // Keep a media session active while the user-enabled foreground listener runs so
+        // Bluetooth/headset media buttons can reach Munch even when its Activity is hidden.
+        mediaSession = MediaSessionCompat(this, "MunchNeckband").apply {
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                    val event = mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                        ?: return super.onMediaButtonEvent(mediaButtonIntent)
+                    if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) return true
+                    return when (event.keyCode) {
+                        KeyEvent.KEYCODE_HEADSETHOOK,
+                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                        KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                            launchVoiceFromNeckband()
+                            true
+                        }
+                        else -> super.onMediaButtonEvent(mediaButtonIntent)
+                    }
+                }
+            })
+            setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setActions(
+                        PlaybackStateCompat.ACTION_PLAY or
+                            PlaybackStateCompat.ACTION_PAUSE or
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE
+                    )
+                    .setState(PlaybackStateCompat.STATE_PLAYING, 0L, 1f)
+                    .build()
+            )
+            isActive = true
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -165,6 +205,15 @@ class WakeWordService : Service() {
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
     }
 
+    private fun launchVoiceFromNeckband() {
+        val launch = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra("munch_wake_listen", true)
+        }
+        updateNotification("Neckband button pressed — tap to talk", listen = true)
+        runCatching { startActivity(launch) }
+    }
+
     private fun handleDedicatedWake() {
         if (handlingWake) return
         dedicatedDetectorActive = false
@@ -259,6 +308,9 @@ class WakeWordService : Service() {
         runCatching { wakeDetector?.release() }
         wakeDetector = null
         dedicatedDetectorActive = false
+        mediaSession?.isActive = false
+        mediaSession?.release()
+        mediaSession = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
