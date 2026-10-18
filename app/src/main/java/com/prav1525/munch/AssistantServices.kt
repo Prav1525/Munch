@@ -434,9 +434,9 @@ object AssistantServices {
         }
 
         val searchText = when {
-            clean.matches(Regex("(?i).+\s+movie\s+songs?")) -> clean
-            clean.matches(Regex("(?i).+\s+songs?")) ->
-                clean.replace(Regex("(?i)\s+songs?$"), "").trim() + " Tamil movie songs full album"
+            clean.matches(Regex("(?i).+\\s+movie\\s+songs?")) -> clean
+            clean.matches(Regex("(?i).+\\s+songs?")) ->
+                clean.replace(Regex("(?i)\\s+songs?$"), "").trim() + " Tamil movie songs full album"
             else -> clean
         }
 
