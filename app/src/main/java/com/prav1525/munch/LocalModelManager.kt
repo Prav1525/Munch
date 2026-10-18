@@ -19,7 +19,8 @@ object LocalModelManager {
     private val executor = Executors.newSingleThreadExecutor()
 
     fun modelFile(context: Context): File = File(context.filesDir, MODEL_FILE)
-    fun isDownloaded(context: Context): Boolean = modelFile(context).let { it.exists() && it.length() > 1_000_000_000L }
+    fun isDownloaded(context: Context): Boolean =
+        modelFile(context).let { it.exists() && it.length() > 1_000_000_000L }
 
     fun download(context: Context, onProgress: (String) -> Unit, onComplete: (Result<File>) -> Unit) {
         executor.execute {
@@ -40,11 +41,14 @@ object LocalModelManager {
                     instanceFollowRedirects = true
                     requestMethod = "GET"
                 }
-                connection.use {
-                    if (it.responseCode !in 200..299) throw IllegalStateException("Model download failed (HTTP ${it.responseCode}).")
-                    val total = it.contentLengthLong
+                try {
+                    val responseCode = connection.responseCode
+                    if (responseCode !in 200..299) {
+                        throw IllegalStateException("Model download failed (HTTP $responseCode).")
+                    }
+                    val total = connection.contentLengthLong
                     FileOutputStream(partial).use { output ->
-                        it.inputStream.use { input ->
+                        connection.inputStream.use { input ->
                             val buffer = ByteArray(64 * 1024)
                             var received = 0L
                             while (true) {
@@ -57,8 +61,12 @@ object LocalModelManager {
                             }
                         }
                     }
+                } finally {
+                    connection.disconnect()
                 }
-                if (partial.length() < 1_000_000_000L) throw IllegalStateException("Downloaded model file is unexpectedly small; please retry.")
+                if (partial.length() < 1_000_000_000L) {
+                    throw IllegalStateException("Downloaded model file is unexpectedly small; please retry.")
+                }
                 if (target.exists()) target.delete()
                 if (!partial.renameTo(target)) throw IllegalStateException("Could not save the model file.")
                 onComplete(Result.success(target))
