@@ -424,9 +424,7 @@ object AssistantServices {
 
     /**
      * Resolve a real YouTube video from search results and open the watch URL directly.
-     * This is more reliable for voice playback than opening a search page and waiting for a tap.
-     * YouTube can change its HTML or require user interaction; failures deliberately fall back
-     * to search results instead of claiming playback was confirmed.
+     * YouTube can change its HTML or require user interaction; failures fall back to search.
      */
     fun playYouTubeSearch(context: Context, query: String, callback: (opened: Boolean, autoPlayRequested: Boolean) -> Unit) {
         val clean = query.trim()
@@ -436,9 +434,9 @@ object AssistantServices {
         }
 
         val searchText = when {
-            clean.matches(Regex("(?i).+\\s+movie\\s+songs?")) -> clean
-            clean.matches(Regex("(?i).+\\s+songs?")) ->
-                clean.replace(Regex("(?i)\\s+songs?$"), "").trim() + " Tamil movie songs full album"
+            clean.matches(Regex("(?i).+\s+movie\s+songs?")) -> clean
+            clean.matches(Regex("(?i).+\s+songs?")) ->
+                clean.replace(Regex("(?i)\s+songs?$"), "").trim() + " Tamil movie songs full album"
             else -> clean
         }
 
@@ -455,8 +453,7 @@ object AssistantServices {
                     setRequestProperty("Accept", "text/html,application/xhtml+xml")
                 }
                 try {
-                    val code = connection.responseCode
-                    if (code !in 200..299) null
+                    if (connection.responseCode !in 200..299) null
                     else {
                         // Bound memory use and tolerate whitespace/format changes in YouTube's JSON.
                         val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
@@ -471,12 +468,11 @@ object AssistantServices {
                             }
                             out.toString()
                         }
-                        val renderer = Regex(
-                            """\"videoRenderer\"\s*:\s*\{[\s\S]{0,16000}?\"videoId\"\s*:\s*\"([A-Za-z0-9_-]{11})\""""
-                        )
-                        val rendererId = renderer.find(html)?.groupValues?.getOrNull(1)
+                        val rendererId = Regex(
+                            """"videoRenderer"\s*:\s*\{[\s\S]{0,16000}?"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
+                        ).find(html)?.groupValues?.getOrNull(1)
                         rendererId ?: Regex(
-                            """\"videoId\"\s*:\s*\"([A-Za-z0-9_-]{11})\""""
+                            """"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
                         ).find(html)?.groupValues?.getOrNull(1)
                     }
                 } finally {
@@ -486,8 +482,8 @@ object AssistantServices {
 
             Handler(Looper.getMainLooper()).post {
                 val flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                val opened = if (!videoId.isNullOrBlank()) {
-                    val directIntents = listOf(
+                val intents = if (!videoId.isNullOrBlank()) {
+                    listOf(
                         Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId"))
                             .setPackage("com.google.android.youtube").addFlags(flags),
                         Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
@@ -495,18 +491,15 @@ object AssistantServices {
                         Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
                             .addFlags(flags)
                     )
-                    directIntents.any { intent ->
-                        runCatching { context.startActivity(intent); true }.getOrDefault(false)
-                    }
                 } else {
                     val searchUri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(searchText))
-                    val searchIntents = listOf(
+                    listOf(
                         Intent(Intent.ACTION_VIEW, searchUri).setPackage("com.google.android.youtube").addFlags(flags),
                         Intent(Intent.ACTION_VIEW, searchUri).addFlags(flags)
                     )
-                    searchIntents.any { intent ->
-                        runCatching { context.startActivity(intent); true }.getOrDefault(false)
-                    }
+                }
+                val opened = intents.any { intent ->
+                    runCatching { context.startActivity(intent); true }.getOrDefault(false)
                 }
                 callback(opened, opened && !videoId.isNullOrBlank())
             }
