@@ -26,7 +26,7 @@ object LocalModelManager {
     fun download(context: Context, onProgress: (String) -> Unit, onComplete: (Result<File>) -> Unit) {
         executor.execute {
             val target = modelFile(context)
-            val partial = File(context.filesDir, "\${MODEL_FILE}.part")
+            val partial = File(context.filesDir, "${MODEL_FILE}.part")
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             val wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Munch:ModelDownload")
             try {
