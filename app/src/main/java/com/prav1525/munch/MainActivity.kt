@@ -75,9 +75,18 @@ private val Hairline = Color(0xFF283143)
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
     private var pushToTalkHandler: (() -> Unit)? = null
+    var wakeIntentVersion by mutableStateOf(0)
+        private set
 
     fun setPushToTalkHandler(handler: (() -> Unit)?) {
         pushToTalkHandler = handler
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Re-trigger Compose wake handling when Android reuses the existing Activity.
+        wakeIntentVersion++
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -233,9 +242,10 @@ private fun MunchHome(activity: MainActivity) {
         onDispose { activity.setPushToTalkHandler(null) }
     }
 
+    val wakeIntentVersion = activity.wakeIntentVersion
     val wakeCommand = activity.intent.getStringExtra("munch_wake_command")
     val wakeListenOnly = activity.intent.getBooleanExtra("munch_wake_listen", false)
-    LaunchedEffect(wakeCommand, wakeListenOnly) {
+    LaunchedEffect(wakeIntentVersion, wakeCommand, wakeListenOnly) {
         if (!wakeCommand.isNullOrBlank()) {
             showConversation = true
             runAssistantRequest(context, activity, wakeCommand, messages, { busy = it }, { statusText = it }, { prompt = "" })
