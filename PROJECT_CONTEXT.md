@@ -45,9 +45,12 @@ These are agreed goals, not implemented or verified features. Confirm technical 
 
 ## Current status (2026-10-18)
 - PROJECT_CONTEXT.md exists on the main branch.
-- The earlier repository inspection reported the repository empty; current Android source/build configuration has not yet been confirmed in this context.
+- Repository inspection on 2026-10-18 confirmed the repo previously contained only this context file; Android app files have now been added to main.
+- Initial scaffold committed: Kotlin + Jetpack Compose, Gradle Kotlin DSL configuration, Android manifest, a bike-assistant home screen, an explicit three-phase roadmap model, unit tests, README, .gitignore, and a GitHub Actions build/test/APK-artifact workflow.
+- Current UI is a prototype shell only. Microphone, wake-word detection, music control, Google Maps navigation, and Bluetooth headset integration are not implemented yet.
 - No successful Android build, automated test run, APK generation, installation, or real-device verification is confirmed yet.
-- The product direction, phased bike-assistant-to-general-assistant roadmap, and initial feature goals have been recorded here.
+- Local build verification was attempted by cloning the repository, but this environment could not resolve github.com (network/DNS unavailable). GitHub Actions currently reports zero workflow runs, so CI results are not yet available.
+- The phased bike-assistant-to-general-assistant roadmap is recorded here and in README.md.
 
 ## Handoff checklist
 1. Fetch this file and inspect the latest repository contents and history.
@@ -57,4 +60,4 @@ These are agreed goals, not implemented or verified features. Confirm technical 
 5. Update this file with verified results and the next concrete step before ending the session.
 
 ## Next step
-Inspect the current repository contents and history. If there is no Android project, initialize the Kotlin/Jetpack Compose project with a minimal, modular bike-assistant MVP. Compile and test it; fix and retest failures. Do not offer an APK until the build succeeds and verification status is clearly reported.
+Get the GitHub Actions build workflow to run and inspect its result. Fix any Gradle/Kotlin/Compose/test failures and rerun until green. Once build/test is verified, continue the first functional milestone: microphone permission and a clearly user-initiated speech-to-text command flow, then music/navigation integrations. Do not offer an APK until a successful build is confirmed.
