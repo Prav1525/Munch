@@ -138,7 +138,6 @@ private fun MunchHome(activity: MainActivity) {
     var destination by remember { mutableStateOf("") }
     var reminderText by remember { mutableStateOf("") }
     var reminderMinutes by remember { mutableStateOf("10") }
-    var apiKey by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Ready when you are") }
@@ -201,7 +200,7 @@ private fun MunchHome(activity: MainActivity) {
             }
 
             if (showAbout) {
-                InfoCard("ABOUT MUNCH", "Your personal assistant for everyday questions, voice, music, navigation and reminders. AI answers need your own Gemini API key in Settings. Hands-free wake-word activation is not enabled in this build.")
+                InfoCard("ABOUT MUNCH", "Your personal assistant for voice, music, navigation, reminders and simple questions. Munch answers common requests offline; full open-ended AI is not available in this free offline build. Hands-free wake-word activation is not enabled in this build.")
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -285,17 +284,15 @@ private fun MunchHome(activity: MainActivity) {
                         Text(selectedVoiceLabel, color = White)
                     }
                     Text("Choose an installed English voice. British voices are listed first; voice gender labels depend on your phone's speech engine.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
-                    Text("Gemini API key", color = Cyan, fontWeight = FontWeight.SemiBold)
-                    OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text("Paste your API key") },
-                        placeholder = { Text("Key stays on this device") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    Text("The key is stored in this app's private preferences, not in GitHub source. For a public production app, a secured backend is safer because client-side keys can be extracted.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Offline mode", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("No API key, subscription, or cloud AI request is required. Common commands and simple replies work locally. Open-ended AI answers are limited in this build.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
                     TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
                         Text("Clear conversation history", color = Violet)
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { AssistantServices.saveApiKey(context, apiKey); apiKey = ""; showSettings = false; statusText = "AI settings saved" }) { Text("SAVE", color = Cyan) } },
+            confirmButton = { TextButton(onClick = { showSettings = false; statusText = "Offline mode ready" }) { Text("DONE", color = Cyan) } },
             dismissButton = { TextButton(onClick = { showSettings = false }) { Text("CANCEL", color = Soft) } }
         )
     }
@@ -426,18 +423,11 @@ private fun runAssistantRequest(
             } else setStatus("Try: remind me in 10 minutes to call home.")
         }
         else -> {
-            setBusy(true)
-            setStatus("Thinking with Gemini…")
-            AssistantServices.ask(context, prompt) { result ->
-                activity.runOnUiThread {
-                    setBusy(false)
-                    val answer = result.getOrElse { it.message ?: "I couldn't get an answer. Check your connection and Gemini API key." }
-                    messages.add(ChatLine("assistant", answer))
-                    AssistantServices.saveMessage(context, "assistant", answer)
-                    setStatus(if (result.isSuccess) "Answered by Gemini" else answer)
-                    if (result.isSuccess) activity.speak(answer)
-                }
-            }
+            val answer = OfflineAssistant.respond(prompt)
+            messages.add(ChatLine("assistant", answer))
+            AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus("Offline assistant")
+            activity.speak(answer)
         }
     }
 }
