@@ -84,3 +84,12 @@
 - Request routing remains local-first: Maps/music/reminder/app-launch commands are handled directly, and OfflineAssistant handles known simple questions. Only the generic offline “can't answer fully” fallback triggers Groq when enabled. Groq is not called for known local responses.
 - Important limitation: the currently checked-in `main` source does **not** include a verified GGUF inference engine. Thus this commit implements offline-rule-based-first + optional Groq fallback, not a confirmed local-LLM-first stack. Before claiming GGUF support, restore/integrate the native inference code and verify model loading on a device.
 - Build/test status for the Groq integration: pending GitHub Actions verification; do not distribute an APK until `testDebugUnitTest assembleDebug` passes and the artifact is inspected.
+
+
+## Hey Munch + app/music commands update (2026-10-18)
+- Added an opt-in Android foreground microphone service for the phrase “Hey Munch”, with an ongoing notification, explicit microphone permission flow, and an attempt to prefer Android's on-device speech recognizer when available.
+- Wake-word listening uses Android general speech recognition, not a dedicated always-on keyword-spotting model. Availability, offline behavior, background restrictions, battery optimization, and recognition accuracy vary by device; this requires real-device testing and must not be advertised as guaranteed offline.
+- Wake phrase followed by a command forwards the command to the same local command router. A bare wake phrase opens voice input.
+- Added generic launcher-app lookup by visible app label (subject to Android package visibility) and music search for “play [song/artist]”. Music search opens a compatible YouTube Music/browser search; actual autoplay and media-session controls depend on the installed music app and are not guaranteed.
+- Direct native commands still run before AI. Groq remains the online answer provider for open-ended prompts when configured and enabled; on provider failure, the deterministic offline responder is used.
+- Changes committed across latest main commits d12d4c3, 2428417, 9de4c8e, 56b665f, and e1e0038. GitHub Actions build/test runs are in progress; do not distribute an APK until the latest source's tests and assembly pass and its artifact is inspected.
