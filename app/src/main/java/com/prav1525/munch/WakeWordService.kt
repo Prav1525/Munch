@@ -133,6 +133,8 @@ class WakeWordService : Service() {
         updateNotification("Heard “Hey Munch” — tap to continue", command, command.isBlank())
         runCatching { startActivity(launch) }
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
+        // Cancellation can suppress the normal onResults callback, so schedule recovery here too.
+        mainHandler.postDelayed({ startRecognition() }, 12_000)
     }
 
     private fun createNotificationChannel() {
