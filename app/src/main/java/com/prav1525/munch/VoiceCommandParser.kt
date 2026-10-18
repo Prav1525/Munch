@@ -55,6 +55,27 @@ object VoiceCommandParser {
         }
     }
 
+    /** Maps simple offline device questions and controls to deterministic skill names. */
+    fun deviceCommand(raw: String): String? {
+        val command = stripWakePhrase(raw)
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[.!?]+$"), "")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+        return when (command) {
+            "what time is it", "tell me the time", "current time", "time please" -> "time"
+            "what is the date", "what's the date", "what date is it", "today's date", "current date" -> "date"
+            "battery", "battery status", "battery level", "what is my battery", "what's my battery",
+            "how much battery", "what is my battery level", "what percentage is my battery" -> "battery"
+            "volume up", "increase volume", "turn volume up", "louder" -> "volume_up"
+            "volume down", "decrease volume", "turn volume down", "quieter" -> "volume_down"
+            "mute", "mute volume", "mute media" -> "mute"
+            "unmute", "unmute volume", "unmute media" -> "unmute"
+            "what can you do", "help", "list your commands", "what commands do you know" -> "help"
+            else -> null
+        }
+    }
+
     /** Extracts a non-empty play request for YouTube; unrelated commands return null. */
     fun youtubePlayQuery(raw: String): String? {
         val command = stripWakePhrase(raw)
