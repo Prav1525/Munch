@@ -1,6 +1,8 @@
 package com.prav1525.munch
 
 import android.content.Context
+import android.content.Intent
+import androidx.core.content.ContextCompat
 import android.os.Handler
 import android.os.Looper
 import java.io.File
@@ -41,16 +43,23 @@ object LocalLlmService {
     }
 
     fun downloadAndLoad(context: Context, onProgress: (String) -> Unit, onComplete: (Result<File>) -> Unit) {
-        LocalModelManager.download(context.applicationContext, { message -> main.post { onProgress(message) } }) { result ->
+        val appContext = context.applicationContext
+        ContextCompat.startForegroundService(appContext, Intent(appContext, ModelDownloadService::class.java))
+        LocalModelManager.download(appContext, { message -> main.post { onProgress(message) } }) { result ->
             result.fold(
                 onSuccess = { file ->
                     main.post { onProgress("Loading model into memory…") }
                     load(context.applicationContext) { loadedResult ->
-                        if (loadedResult.getOrDefault(false)) onComplete(Result.success(file))
-                        else onComplete(Result.failure(loadedResult.exceptionOrNull() ?: IllegalStateException("The model could not be loaded on this device.")))
+                        if (loadedResult.getOrDefault(false)) {
+                            appContext.stopService(Intent(appContext, ModelDownloadService::class.java))
+                            onComplete(Result.success(file))
+                        } else {
+                            appContext.stopService(Intent(appContext, ModelDownloadService::class.java))
+                            onComplete(Result.failure(loadedResult.exceptionOrNull() ?: IllegalStateException("The model could not be loaded on this device.")))
+                        }
                     }
                 },
-                onFailure = { error -> main.post { onComplete(Result.failure(error)) } }
+                onFailure = { error -> main.post { appContext.stopService(Intent(appContext, ModelDownloadService::class.java)); onComplete(Result.failure(error)) } }
             )
         }
     }
