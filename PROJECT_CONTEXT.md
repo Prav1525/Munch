@@ -160,3 +160,10 @@
 - Important limitation: this commit does not yet include Spotify OAuth/Web API playback, queue management, or reliable automatic selection/playback in Spotify. Search opens the Spotify app/web search and user selection may still be needed. Spotify Web API integration requires a registered developer app, OAuth user consent, and an active Spotify Premium playback account for playback-control endpoints. Do not claim full agent-level parity until that is implemented and verified.
 - AccessibilityService use must remain transparent, user-enabled, narrowly tied to the explicit music command, and compliant with current Android/Google Play policy. Never claim physical-device success based only on CI.
 - CI run for the dual music-control changes: pending; inspect the latest run on this branch before distributing an APK.
+
+
+## Spotify API follow-up (2026-10-18)
+- Added a Spotify Web API client using Authorization Code + PKCE. It stores the user-supplied Spotify Client ID and OAuth tokens in app-private preferences; no Spotify client secret is embedded. The app uses a `munch://spotify-callback` redirect that must be registered exactly in the user's Spotify developer dashboard.
+- Settings now exposes the Spotify Client ID field and Connect Spotify action. After OAuth authorization, “play [track] on Spotify” searches the Spotify catalog and asks the active Spotify device to play the first track result. Next/previous/pause/resume/toggle commands use the Spotify Web API when connected, with Android media-key fallback when not connected.
+- Spotify Web API playback requires Premium and an active device; a search result or HTTP success is not a guarantee that sound was heard. Test on a phone with Spotify installed, a valid Client ID, the redirect URI registered, and the user signed in.
+- Spotify sign-in and API playback have not yet been verified against a real Spotify developer app. Latest CI must pass before an APK is distributed.
