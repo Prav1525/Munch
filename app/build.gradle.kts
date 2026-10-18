@@ -54,7 +54,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.media:media:1.7.0")
-    implementation("com.github.msnilsen:openwakeword-android:0.1.0")
+    implementation("com.github.suxsem:AndroidWakeWord:v0.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
