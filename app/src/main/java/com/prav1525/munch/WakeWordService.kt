@@ -5,13 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.view.KeyEvent
 import androidx.media.session.MediaButtonReceiver
+import androidx.core.content.ContextCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.speech.RecognitionListener
@@ -98,6 +101,11 @@ class WakeWordService : Service() {
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
 
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            updateNotification("Microphone permission required — open Munch to enable")
+            return
+        }
+
         if (forceSpeechFallback) {
             startSpeechRecognition()
             return
@@ -138,6 +146,8 @@ class WakeWordService : Service() {
             return
         } catch (_: Exception) {
             dedicatedDetectorActive = false
+            forceSpeechFallback = true
+            runCatching { wakeDetector?.stop() }
             runCatching { wakeDetector?.release() }
             wakeDetector = null
             updateNotification("Wake detector unavailable — using speech fallback")
