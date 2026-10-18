@@ -3,6 +3,7 @@ package com.prav1525.munch
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognizerIntent
@@ -157,6 +158,31 @@ private fun MunchHome(activity: MainActivity) {
             } else statusText = "I didn't catch that. Try again."
         } else statusText = "Voice input was cancelled or unavailable."
     }
+
+    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !modelBusy && !LocalLlmService.isLoaded()) {
+            modelBusy = true
+            modelStatus = "Importing model from device…"
+            LocalModelManager.importModel(context, uri, { modelStatus = it }) { imported ->
+                imported.fold(
+                    onSuccess = {
+                        modelStatus = "Model copied; loading into memory…"
+                        LocalLlmService.load(context) { loaded ->
+                            modelBusy = false
+                            modelStatus = if (loaded.getOrDefault(false)) "Ready — imported GGUF is running on-device."
+                                else "Model copied, but could not load. Try a compatible ARM64 GGUF model."
+                            statusText = if (loaded.getOrDefault(false)) "Local AI ready" else "Offline fallback ready"
+                        }
+                    },
+                    onFailure = {
+                        modelBusy = false
+                        modelStatus = "Import failed: ${it.message ?: "could not read file"}"
+                    }
+                )
+            }
+        }
+    }
+
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) launchSpeech(speechLauncher) { statusText = it }
         else statusText = "Microphone permission is needed for voice conversations."
@@ -308,6 +334,13 @@ private fun MunchHome(activity: MainActivity) {
                         enabled = !modelBusy && !LocalLlmService.isLoaded(),
                         colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)
                     ) { Text(if (modelBusy) "Preparing model…" else if (LocalLlmService.isLoaded()) "Local model ready" else "Download & enable Qwen3", color = Cyan) }
+
+                    Button(
+                        onClick = { modelPicker.launch(arrayOf("*/*")) },
+                        enabled = !modelBusy && !LocalLlmService.isLoaded(),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)
+                    ) { Text("Load GGUF from device", color = Cyan) }
+                    Text("Choose a compatible .gguf file already on your phone. Munch copies it into app storage and reuses it after restart/reinstall of the app's data is not guaranteed; keep your original file in Downloads.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("If the model is not installed, Munch continues using its built-in offline replies. Model download requires internet once; chat inference does not.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
                     TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
