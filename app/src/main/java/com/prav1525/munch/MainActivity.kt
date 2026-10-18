@@ -143,6 +143,9 @@ private fun MunchHome(activity: MainActivity) {
     var prompt by remember { mutableStateOf("") }
     var groqApiKey by remember { mutableStateOf(AssistantServices.getGroqApiKey(context)) }
     var onlineFallbackEnabled by remember { mutableStateOf(AssistantServices.isGroqFallbackEnabled(context)) }
+    var apiCallsToday by remember { mutableStateOf(AssistantServices.getApiCallsToday(context)) }
+    var groqApiCallsToday by remember { mutableStateOf(AssistantServices.getGroqApiCallsToday(context)) }
+    var geminiApiCallsToday by remember { mutableStateOf(AssistantServices.getGeminiApiCallsToday(context)) }
     var wakeEnabled by remember { mutableStateOf(context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).getBoolean("wake_word_enabled", false)) }
     var pendingWakeEnable by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -219,7 +222,12 @@ private fun MunchHome(activity: MainActivity) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.clip(CircleShape).border(1.dp, Hairline, CircleShape).background(SurfaceDark)
-                        .clickable { showSettings = true }.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                        .clickable {
+                            apiCallsToday = AssistantServices.getApiCallsToday(context)
+                            groqApiCallsToday = AssistantServices.getGroqApiCallsToday(context)
+                            geminiApiCallsToday = AssistantServices.getGeminiApiCallsToday(context)
+                            showSettings = true
+                        }.padding(horizontal = 12.dp, vertical = 9.dp)) {
                         Text("SETTINGS", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Box(Modifier.clip(CircleShape).border(1.dp, Hairline, CircleShape).background(SurfaceDark)
@@ -314,6 +322,8 @@ private fun MunchHome(activity: MainActivity) {
                         Text(selectedVoiceLabel, color = White)
                     }
                     Text("Choose an installed English voice. British voices are listed first; voice gender labels depend on your phone's speech engine.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("API usage today", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("$apiCallsToday AI request(s) today · Groq $groqApiCallsToday · Gemini $geminiApiCallsToday. Counts reset at local midnight and include failed/retried request attempts. Offline commands do not count.", color = White, fontSize = 12.sp, lineHeight = 17.sp)
                     Text("Local-first hybrid AI", color = Cyan, fontWeight = FontWeight.SemiBold)
                     Text("Native actions such as opening apps, music search, Maps and reminders run locally first. For open-ended questions, Groq is the primary AI when a key is saved and online AI is enabled; if it fails, Munch gives a concise offline fallback. Your API key is stored in app-private preferences, not bundled into source code.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     OutlinedTextField(
@@ -445,8 +455,12 @@ private fun launchSpeech(
     try {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Munch")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("en", "IN").toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, Locale("en", "IN").toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, "com.prav1525.munch")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak clearly to Munch")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
         launcher.launch(intent)
         status("Listening through Android speech recognition…")
