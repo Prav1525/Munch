@@ -141,3 +141,11 @@
 - Important AI limitation: no verified GGUF inference engine/model is included in this source snapshot. The assistant is deterministic offline rules with optional online Groq fallback, not a full offline local LLM.
 - Real-device tests for media noise, screen-off operation, Bluetooth/headset button, actual YouTube autoplay, battery use, and Android background launch restrictions remain outstanding.
 - Latest build/test status after these changes: pending GitHub Actions; do not distribute an APK until the latest branch head passes testDebugUnitTest assembleDebug and the APK artifact is present and inspected.
+
+
+## Media-agent control iteration (2026-10-18)
+- Added native Android media transport key dispatch for next, previous, pause, play/resume, and playback toggle. These commands target Android's currently active media session; a third-party player may ignore them or may not publish a controllable session.
+- Voice routing now recognizes common next/skip, previous/back, pause, and resume commands before generic AI fallback.
+- Generic `play <query>` requests now open YouTube Music search rather than opening a random YouTube video watch page. This avoids treating a music request as a video request, but does not yet auto-select a result or guarantee autoplay. Explicit `play <query> on YouTube` still follows the video path.
+- CI build/test is required for the latest changes. Physical-device tests are still needed to confirm media keys reach YouTube Music and that the background wake/command capture remains active while another app is foregrounded.
+- Next step for true agent-like behavior: use a user-enabled, transparent AccessibilityService (only if the user opts in) to select the first suitable search result and handle app UI transitions, paired with media-session commands for transport. Do not use hidden UI automation, and do not claim guaranteed control across every music app. A service like this must clearly disclose its scope and have a safe fallback when UI structure changes.
