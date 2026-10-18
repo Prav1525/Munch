@@ -93,3 +93,11 @@
 - Added generic launcher-app lookup by visible app label (subject to Android package visibility) and music search for “play [song/artist]”. Music search opens a compatible YouTube Music/browser search; actual autoplay and media-session controls depend on the installed music app and are not guaranteed.
 - Direct native commands still run before AI. Groq remains the online answer provider for open-ended prompts when configured and enabled; on provider failure, the deterministic offline responder is used.
 - Changes committed across latest main commits d12d4c3, 2428417, 9de4c8e, 56b665f, and e1e0038. GitHub Actions build/test runs are in progress; do not distribute an APK until the latest source's tests and assembly pass and its artifact is inspected.
+
+
+## Latest verified build (2026-10-18)
+- Source commit `8146149d3fd16af6bbad9c17667def312cf50b96` passed the GitHub Actions job `gradle --no-daemon testDebugUnitTest assembleDebug`; the workflow completed successfully: https://github.com/Prav1525/Munch/actions/runs/39115412127.
+- Artifact `munch-debug-apk` was downloaded and inspected. The ZIP passed integrity testing and contained `app-debug.apk` (9,518,197 bytes). APK SHA-256: `94e6857e92777bc5cb76e08bac8485865c338b2cfc64ee46266c509f5523fcbb`.
+- Implemented: Groq primary for open-ended prompts when the user has entered a key and online AI is enabled (online AI now defaults enabled); deterministic offline fallback; direct command routing for Maps/reminders/music/app launching; app-name lookup; music search; optional foreground “Hey Munch” listener.
+- Not verified on a physical phone: wake-word reliability with the screen off, background microphone policy, battery impact, actual track autoplay, Bluetooth/helmet audio, or third-party app behavior. “Play [song]” opens a music search and does not guarantee automatic playback. The fallback is the deterministic OfflineAssistant, not a confirmed GGUF local LLM.
+- Release next steps: install the APK on the user's phone, enter their own Groq API key in Settings, test app launch/music/search and wake phrase under real conditions, and only then consider a release build. Do not claim the wake phrase is guaranteed always-on or fully offline.
