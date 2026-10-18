@@ -264,9 +264,14 @@ class WakeWordService : Service() {
                 mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
                 return
             }
-            // Speech engines return alternatives; don't discard a valid wake phrase just because
-            // the first transcript was wrong.
-            val wakePhrase = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
+            // Speech fallback can transcribe music lyrics. Require the wake phrase at the
+            // beginning of the final transcript, and use confidence when the provider supplies it.
+            val wakeIndex = phrases.indexOfFirst { wakePhraseStartRegex().containsMatchIn(it) }
+            val scores = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+            val confidentEnough = wakeIndex >= 0 &&
+                (scores == null || wakeIndex >= scores.size || scores[wakeIndex] < 0f ||
+                    scores[wakeIndex] >= FALLBACK_WAKE_CONFIDENCE)
+            val wakePhrase = if (confidentEnough) phrases[wakeIndex] else null
             if (wakePhrase != null) {
                 handlePhrase(wakePhrase.trim())
             } else {
@@ -278,16 +283,8 @@ class WakeWordService : Service() {
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
         }
         override fun onPartialResults(partialResults: android.os.Bundle?) {
-            if (awaitingCommand) return
-            val phrases = partialResults
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                .orEmpty()
-            // If the wake phrase and a complete command are already present in a partial
-            // transcript, hand it off immediately rather than waiting for end-of-speech.
-            // Wake on the phrase alone too; the Activity then opens normal command capture.
-            // This avoids requiring the user to say the command in the same recognition window.
-            val candidate = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
-            if (candidate != null) handlePhrase(candidate.trim())
+            // Partial transcripts often mistake music lyrics for wake phrases. Wait for final
+            // recognition and apply the stricter wake-prefix/confidence checks there.
         }
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
     }
@@ -410,7 +407,8 @@ class WakeWordService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private fun wakePhraseRegex() = Regex("\\bhey[\\s,]+(?:jarvis|mun?ch)\\b", RegexOption.IGNORE_CASE)
+        private fun wakePhraseStartRegex() = Regex("^\\s*hey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)$", RegexOption.IGNORE_CASE)
+        private const val FALLBACK_WAKE_CONFIDENCE = 0.65f
         private const val CHANNEL_ID = "munch_wake_listener"
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
