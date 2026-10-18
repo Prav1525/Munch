@@ -44,6 +44,33 @@ android {
     }
 }
 
+import java.net.URL
+
+val downloadHeyJarvisWakeModel = tasks.register("downloadHeyJarvisWakeModel") {
+    val modelFile = layout.buildDirectory.file("generated/wakeword-assets/hey_jarvis_v0.1.onnx")
+    outputs.file(modelFile)
+    doLast {
+        val destination = modelFile.get().asFile
+        if (!destination.exists()) {
+            destination.parentFile.mkdirs()
+            URL("https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx")
+                .openStream().use { input ->
+                    destination.outputStream().use { output -> input.copyTo(output) }
+                }
+        }
+        check(destination.length() > 100_000L) {
+            "Hey Jarvis ONNX model download is missing or incomplete: $destination"
+        }
+    }
+}
+
+android.sourceSets.getByName("main").assets.srcDir(
+    layout.buildDirectory.dir("generated/wakeword-assets")
+)
+tasks.named("preBuild").configure {
+    dependsOn(downloadHeyJarvisWakeModel)
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)
@@ -56,7 +83,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.media:media:1.7.0")
-    implementation("com.github.suxsem.AndroidWakeWord:AndroidWakeWord:v0.0.1")
+    implementation("com.github.suxsem:AndroidWakeWord:v0.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
