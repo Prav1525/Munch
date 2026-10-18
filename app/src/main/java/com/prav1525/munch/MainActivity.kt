@@ -3,7 +3,6 @@ package com.prav1525.munch
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognizerIntent
@@ -163,22 +162,24 @@ private fun MunchHome(activity: MainActivity) {
         if (uri != null && !modelBusy && !LocalLlmService.isLoaded()) {
             modelBusy = true
             modelStatus = "Importing model from device…"
-            LocalModelManager.importModel(context, uri, { modelStatus = it }) { imported ->
-                imported.fold(
-                    onSuccess = {
-                        modelStatus = "Model copied; loading into memory…"
-                        LocalLlmService.load(context) { loaded ->
+            LocalModelManager.importModel(context, uri, { message -> activity.runOnUiThread { modelStatus = message } }) { imported ->
+                activity.runOnUiThread {
+                    imported.fold(
+                        onSuccess = {
+                            modelStatus = "Model copied; loading into memory…"
+                            LocalLlmService.load(context) { loaded ->
+                                modelBusy = false
+                                modelStatus = if (loaded.getOrDefault(false)) "Ready — imported GGUF is running on-device."
+                                    else "Model copied, but could not load. Try a compatible ARM64 GGUF model."
+                                statusText = if (loaded.getOrDefault(false)) "Local AI ready" else "Offline fallback ready"
+                            }
+                        },
+                        onFailure = {
                             modelBusy = false
-                            modelStatus = if (loaded.getOrDefault(false)) "Ready — imported GGUF is running on-device."
-                                else "Model copied, but could not load. Try a compatible ARM64 GGUF model."
-                            statusText = if (loaded.getOrDefault(false)) "Local AI ready" else "Offline fallback ready"
+                            modelStatus = "Import failed: ${it.message ?: "could not read file"}"
                         }
-                    },
-                    onFailure = {
-                        modelBusy = false
-                        modelStatus = "Import failed: ${it.message ?: "could not read file"}"
-                    }
-                )
+                    )
+                }
             }
         }
     }
