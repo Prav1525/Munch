@@ -85,7 +85,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Re-trigger Compose wake handling when Android reuses the existing Activity.
+        SpotifyAgent.handleRedirect(this, intent.data)
+        // Re-trigger Compose state updates when Android reuses the existing Activity.
         wakeIntentVersion++
     }
 
@@ -106,6 +107,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SpotifyAgent.handleRedirect(this, intent?.data)
         selectedVoiceName = getSharedPreferences("munch_preferences", MODE_PRIVATE).getString("tts_voice_name", null)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -172,6 +174,8 @@ private fun MunchHome(activity: MainActivity) {
     var reminderMinutes by remember { mutableStateOf("10") }
     var prompt by remember { mutableStateOf("") }
     var groqApiKey by remember { mutableStateOf(AssistantServices.getGroqApiKey(context)) }
+    var spotifyClientId by remember { mutableStateOf(SpotifyAgent.getClientId(context)) }
+    var spotifyStatus by remember { mutableStateOf(SpotifyAgent.getStatus(context)) }
     var onlineFallbackEnabled by remember { mutableStateOf(AssistantServices.isGroqFallbackEnabled(context)) }
     var apiCallsToday by remember { mutableStateOf(AssistantServices.getApiCallsToday(context)) }
     var groqApiCallsToday by remember { mutableStateOf(AssistantServices.getGroqApiCallsToday(context)) }
@@ -403,6 +407,26 @@ private fun MunchHome(activity: MainActivity) {
                             onlineFallbackEnabled = it
                             AssistantServices.setGroqFallbackEnabled(context, it)
                         })
+                    }
+                    Text("Spotify agent connection", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(
+                        value = spotifyClientId,
+                        onValueChange = { spotifyClientId = it; SpotifyAgent.saveClientId(context, it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Spotify developer Client ID") },
+                        placeholder = { Text("Paste your app Client ID") },
+                        singleLine = true
+                    )
+                    Text("Register redirect URI exactly as: " + SpotifyAgent.REDIRECT_URI, color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text(spotifyStatus, color = if (SpotifyAgent.isConnected(context)) Cyan else Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    TextButton(onClick = {
+                        SpotifyAgent.saveClientId(context, spotifyClientId)
+                        spotifyStatus = if (spotifyClientId.isBlank()) "Add a Spotify developer Client ID first."
+                            else if (SpotifyAgent.connect(context)) "Finish sign-in in Spotify, then return to Munch."
+                            else "Could not open Spotify sign-in. Check the Client ID."
+                    }) { Text("Connect Spotify", color = Violet) }
+                    LaunchedEffect(activity.wakeIntentVersion) {
+                        spotifyStatus = SpotifyAgent.getStatus(context)
                     }
                     Text("Music app control", color = Cyan, fontWeight = FontWeight.SemiBold)
                     Text("YouTube Music: optionally enable the Munch helper to select a visible result matching the song you asked for. Spotify: search through the Spotify app; playback transport commands use Android media controls. Full Spotify API queue/playback integration needs a registered Spotify developer app and user authorization.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
@@ -663,6 +687,25 @@ private fun runAssistantRequest(
             } else setStatus("Tell me the destination you want.")
         }
         Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val query = Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE)
+                .matchEntire(prompt.trim())!!.groupValues[1].trim()
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                setStatus("Searching Spotify and starting playback for $query…")
+                SpotifyAgent.searchAndPlay(context, query) { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify couldn't start playback: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+                val opened = AssistantServices.searchSpotify(context, query)
+                val answer = if (opened) "Opening Spotify search for $query. Connect Spotify in Settings to enable direct song selection and playback control."
+                    else "I couldn't open Spotify. Check that it is installed or that your browser can open Spotify."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            }
+        }
             val query = Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE)
                 .matchEntire(prompt.trim())!!.groupValues[1].trim()
             val opened = AssistantServices.searchSpotify(context, query)
