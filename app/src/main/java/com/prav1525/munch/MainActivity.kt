@@ -409,6 +409,23 @@ private fun runAssistantRequest(
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
         }
+        Regex("^(open|launch|start|show)\\s+(whatsapp|youtube|chrome|browser|internet|camera|phone|dialer|call|messages|sms|text messages|calendar|settings|contacts|gmail|email|mail|clock|alarm)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val app = prompt.trim().lowercase(Locale.ROOT)
+                .replace(Regex("^(open|launch|start|show)\\s+"), "")
+                .trim().trimEnd('.', '!')
+            val opened = AssistantServices.openExternalApp(context, app)
+            val label = when (app) {
+                "browser", "internet", "chrome" -> "your browser"
+                "phone", "dialer", "call" -> "the phone dialer"
+                "messages", "sms", "text messages" -> "Messages"
+                "gmail", "email", "mail" -> "your email app"
+                "clock", "alarm" -> "Clock"
+                else -> app.replaceFirstChar { it.uppercase() }
+            }
+            val answer = if (opened) "Opening $label." else "I couldn't find an app to open for $app."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
         lower.startsWith("remind me in ") -> {
             val match = Regex("remind me in (\\d+)\\s*(minute|minutes|min|hour|hours|hr|hrs)\\s*(?:to)?\\s*(.*)", RegexOption.IGNORE_CASE).find(prompt)
             if (match != null) {
