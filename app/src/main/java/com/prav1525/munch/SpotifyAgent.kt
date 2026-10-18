@@ -60,7 +60,7 @@ object SpotifyAgent {
         }.getOrDefault(false)
     }
 
-    fun handleRedirect(context: Context, uri: Uri?): Boolean {
+    fun handleRedirect(context: Context, uri: Uri?, onComplete: (() -> Unit)? = null): Boolean {
         if (uri == null || uri.scheme != "munch" || uri.host != "spotify-callback") return false
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val expected = prefs.getString(STATE, "").orEmpty()
@@ -71,6 +71,7 @@ object SpotifyAgent {
             prefs.edit().remove(STATE).remove(VERIFIER)
                 .putString("spotify_status", if (error.isNotBlank()) "Spotify authorization denied: " + error else "Spotify sign-in check failed; connect again.")
                 .apply()
+            onComplete?.invoke()
             return true
         }
         val verifier = prefs.getString(VERIFIER, "").orEmpty()
@@ -86,6 +87,7 @@ object SpotifyAgent {
                 "Spotify connected. Playback commands need Premium and an active Spotify device."
             }.getOrElse { "Spotify connection failed: " + (it.message ?: "unknown error").take(180) }
             prefs.edit().putString("spotify_status", status).apply()
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete?.invoke() }
         }
         return true
     }
