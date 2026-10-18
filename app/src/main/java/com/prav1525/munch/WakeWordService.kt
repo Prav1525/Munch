@@ -45,7 +45,7 @@ class WakeWordService : Service() {
     }
 
     private fun startRecognition() {
-        if (listening || !getSharedPreferences("munch_preferences", MODE_PRIVATE)
+        if (listening || handlingWake || !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             updateNotification("Speech recognition unavailable")
@@ -65,7 +65,8 @@ class WakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("en", "IN").toLanguageTag())
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             }
             listening = true
             updateNotification("Listening for “Hey Munch”")
@@ -100,7 +101,19 @@ class WakeWordService : Service() {
             handlePhrase(phrase.trim())
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
         }
-        override fun onPartialResults(partialResults: android.os.Bundle?) = Unit
+        override fun onPartialResults(partialResults: android.os.Bundle?) {
+            val phrases = partialResults
+                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                .orEmpty()
+            // If the wake phrase and a complete command are already present in a partial
+            // transcript, hand it off immediately rather than waiting for end-of-speech.
+            val candidate = phrases.firstOrNull {
+                val match = Regex(".*?\\bhey[\\s,]+mun?ch\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE)
+                    .matchEntire(it)
+                match != null && match.groupValues.getOrElse(1) { "" }.trim().length >= 2
+            }
+            if (candidate != null) handlePhrase(candidate.trim())
+        }
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
     }
 
