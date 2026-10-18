@@ -69,3 +69,11 @@
 - Important limitation: this change does NOT bundle a full local language model. General free-form AI quality is limited. Android Gemini Nano/ML Kit GenAI is free of per-request cloud inference costs but only works on supported devices and may require model setup/download; it is not assumed to work on every phone. A future model integration must check runtime availability and preserve deterministic offline fallback.
 - Maps navigation and Android speech recognition can still rely on installed apps, device speech services, or internet depending on device/settings. Do not promise every feature works without internet.
 - Build and tests must be confirmed from the latest GitHub Actions run before delivering an APK.
+
+
+## External app launcher update (2026-10-18)
+- Added explicit Android intent routing for common spoken/typed commands: open WhatsApp, YouTube, browser/Chrome, camera, phone dialer, Messages, Calendar, Settings, Contacts, email, and Clock/alarms.
+- Existing music and Google Maps handoffs remain in place. This launches the target app or system handler; it does not grant Munch unrestricted access to read/control third-party app data. Sending messages, making calls, or controlling media still needs specific safe intent integrations and user confirmation where appropriate.
+- Changes committed to main: `2a9aafff3a19812882fb1ba0956edfcd8f8f569b` (external app helper) and `6817f695ea50126d9839ded0fb157e8c66fd02f1` (command routing).
+- CI build/tests for these latest commits are not yet verified; do not deliver an APK until Actions passes.
+- Latency note: the checked-in main branch's `OfflineAssistant.kt` is a deterministic rule-based responder and the README says the GGUF model integration is not included in this source snapshot. Therefore, do not attribute the user's observed 2–3 second delay to local LLM inference until the actual model-enabled source/build is reconciled. Speech recognition service startup and TTS startup may contribute to perceived delay. Next step is to inspect the model-enabled source and profile timing on-device before claiming a speed improvement.
