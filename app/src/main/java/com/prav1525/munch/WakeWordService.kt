@@ -389,6 +389,12 @@ class WakeWordService : Service() {
             AssistantServices.saveMessage(this, "assistant", message)
         }
 
+        // Answer simple device questions and controls locally, even with the app UI closed.
+        DeviceCommandActions.execute(this, command)?.let { message ->
+            report(message)
+            return true
+        }
+
         val spotifyPlay = Regex("^play\\s+(.+?)\\s+on\\s+spotify$", RegexOption.IGNORE_CASE)
             .matchEntire(command)
         if (spotifyPlay != null) {
