@@ -412,17 +412,13 @@ class WakeWordService : Service() {
      * allowing an Activity launch from the background immediately after wake detection.
      */
     private fun dispatchCapturedCommand(rawCommand: String) {
-        val command = rawCommand.trim()
-            .replace(Regex("(?i)^hey[\\s,]+(?:jarvis|mun?ch)[,\\s:;.!?-]*"), "")
-            .trim().trimEnd('.', '!', '?')
+        val command = VoiceCommandParser.stripWakePhrase(rawCommand)
         if (command.isBlank()) {
             updateNotification("Wake phrase heard — say your command", listen = true)
             return
         }
-        val play = Regex("^(?:please\\s+)?play\\s+(.+?)(?:\\s+on\\s+youtube)?$", RegexOption.IGNORE_CASE)
-            .matchEntire(command)
-        if (play != null && play.groupValues[1].isNotBlank()) {
-            val query = play.groupValues[1].trim()
+        val query = VoiceCommandParser.youtubePlayQuery(command)
+        if (query != null) {
             updateNotification("Finding YouTube playback for $query…")
             AssistantServices.playYouTubeSearch(this, query) { opened, autoPlay ->
                 updateNotification(
