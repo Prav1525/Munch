@@ -327,7 +327,7 @@ private fun MunchHome(activity: MainActivity) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text("Allow online fallback", color = White, fontSize = 13.sp)
-                            Text(if (onlineFallbackEnabled) "Online AI enabled" else "Offline only", color = Soft, fontSize = 11.sp)
+                            Text(if (onlineFallbackEnabled && groqApiKey.isNotBlank()) "Groq primary • offline fallback" else if (onlineFallbackEnabled) "Add a key to enable Groq" else "Offline only", color = Soft, fontSize = 11.sp)
                         }
                         Switch(checked = onlineFallbackEnabled, onCheckedChange = {
                             onlineFallbackEnabled = it
