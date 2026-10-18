@@ -538,6 +538,28 @@ object AssistantServices {
         }.getOrDefault(false)
     }
 
+    /**
+     * Sends a transport command to Android's currently active media session.
+     * This works with players that publish a media session; Android does not expose
+     * a universal way to verify that a third-party app actually changed playback.
+     */
+    fun sendMediaCommand(context: Context, command: String): Boolean {
+        val keyCode = when (command.trim().lowercase(Locale.ROOT)) {
+            "next", "next song", "skip", "skip song" -> KeyEvent.KEYCODE_MEDIA_NEXT
+            "previous", "previous song", "back", "last song" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            "pause", "pause music", "stop music" -> KeyEvent.KEYCODE_MEDIA_PAUSE
+            "play", "resume", "resume music", "continue music" -> KeyEvent.KEYCODE_MEDIA_PLAY
+            "play pause", "toggle playback", "toggle music" -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            else -> return false
+        }
+        return runCatching {
+            val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+            audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+            true
+        }.getOrDefault(false)
+    }
+
     /** Opens a search for the requested track/artist in a music app or browser. Playback depends on that app. */
     fun searchMusic(context: Context, query: String): Boolean {
         val clean = query.trim()
