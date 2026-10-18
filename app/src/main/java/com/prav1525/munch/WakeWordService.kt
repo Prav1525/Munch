@@ -35,6 +35,7 @@ class WakeWordService : Service() {
     private var listening = false
     private var dedicatedDetectorActive = false
     private var forceSpeechFallback = false
+    private var preferSystemRecognizer = false
     private var handlingWake = false
     private var mediaSession: MediaSessionCompat? = null
 
@@ -162,7 +163,11 @@ class WakeWordService : Service() {
         }
         try {
             recognizer?.destroy()
-            recognizer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            // Some Android speech providers advertise on-device recognition but fail with
+            // ERROR_SERVER_DISCONNECTED (11) or cannot load en-IN (13). Try on-device first,
+            // then fall back to the system provider with the widely supported en-US locale.
+            recognizer = if (!preferSystemRecognizer &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
                 SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
             } else {
@@ -171,10 +176,15 @@ class WakeWordService : Service() {
             recognizer?.setRecognitionListener(listener)
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("en", "IN").toLanguageTag())
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    if (preferSystemRecognizer) Locale.US.toLanguageTag() else Locale("en", "IN").toLanguageTag()
+                )
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                // Offline language packs are not installed on every device. Allow the system
+                // provider to use its normal route after the on-device attempt fails.
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, !preferSystemRecognizer)
             }
             listening = true
             updateNotification("Speech fallback listening for “Hey Jarvis” or “Hey Munch”")
@@ -209,11 +219,24 @@ class WakeWordService : Service() {
                 SpeechRecognizer.ERROR_NO_MATCH -> "no speech match — retrying"
                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "speech service busy"
                 SpeechRecognizer.ERROR_SERVER -> "speech service error"
+                SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "speech provider disconnected"
+                SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "language not supported by this provider"
+                SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "language pack unavailable"
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "no speech detected — retrying"
                 else -> "speech error $error"
             }
-            updateNotification("Speech fallback: $reason")
-            mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+            // Recover from provider/language failures instead of retrying the same broken
+            // on-device en-IN recognizer forever.
+            if (error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED ||
+                error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
+                error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED) {
+                preferSystemRecognizer = true
+                updateNotification("Speech fallback: $reason — switching recognizer")
+                mainHandler.postDelayed({ startSpeechRecognition() }, 2_500L)
+            } else {
+                updateNotification("Speech fallback: $reason")
+                mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+            }
         }
         override fun onResults(results: android.os.Bundle?) {
             listening = false
