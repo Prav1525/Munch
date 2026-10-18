@@ -404,6 +404,13 @@ private fun MunchHome(activity: MainActivity) {
                             AssistantServices.setGroqFallbackEnabled(context, it)
                         })
                     }
+                    Text("Music app control", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("YouTube Music: optionally enable the Munch helper to select a visible result matching the song you asked for. Spotify: search through the Spotify app; playback transport commands use Android media controls. Full Spotify API queue/playback integration needs a registered Spotify developer app and user authorization.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        statusText = "In Accessibility settings, enable Munch YouTube Music helper only if you want automatic matching-result selection."
+                    }) { Text("Set up YouTube Music helper", color = Violet) }
+                    Text("The helper is optional, only observes YouTube Music windows, and clicks only a visible result matching your requested title. It may not work with every app layout.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Hands-free wake phrase", color = Cyan, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -654,6 +661,21 @@ private fun runAssistantRequest(
                 messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
                 setStatus(answer); activity.speak(answer)
             } else setStatus("Tell me the destination you want.")
+        }
+        Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val query = Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE)
+                .matchEntire(prompt.trim())!!.groupValues[1].trim()
+            val opened = AssistantServices.searchSpotify(context, query)
+            val answer = if (opened) "Opening Spotify search for $query. Choose a result to start playback; next, previous, pause and resume use Android media controls."
+                else "I couldn't open Spotify. Check that it is installed or that your browser can open Spotify."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^(?:open|launch|start)\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val opened = AssistantServices.openSpotify(context)
+            val answer = if (opened) "Opening Spotify." else "I couldn't open Spotify."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
         }
         Regex("^play\\s+(.+)$", RegexOption.IGNORE_CASE).matches(prompt.trim()) &&
             !lower.matches(Regex("^play\\s+(music|my music|some music|the music)[.! ]*$")) -> {
