@@ -91,6 +91,7 @@ class MainActivity : ComponentActivity() {
                 } else engine.language = Locale.UK
             }
         }
+        LocalLlmService.load(applicationContext)
         setContent { MaterialTheme { MunchHome(this) } }
     }
 
@@ -141,6 +142,8 @@ private fun MunchHome(activity: MainActivity) {
     var prompt by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Ready when you are") }
+    var modelStatus by remember { mutableStateOf(if (LocalModelManager.isDownloaded(context)) "Model downloaded; preparing…" else "Model not downloaded") }
+    var modelBusy by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf<ChatLine>().apply {
         AssistantServices.readHistory(context).forEach { add(ChatLine(it.first, it.second)) }
     } }
@@ -284,8 +287,28 @@ private fun MunchHome(activity: MainActivity) {
                         Text(selectedVoiceLabel, color = White)
                     }
                     Text("Choose an installed English voice. British voices are listed first; voice gender labels depend on your phone's speech engine.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
-                    Text("Offline mode", color = Cyan, fontWeight = FontWeight.SemiBold)
-                    Text("No API key, subscription, or cloud AI request is required. Common commands and simple replies work locally. Open-ended AI answers are limited in this build.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("On-device AI model", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("Qwen3 4B Q4_K_M runs on your phone after a one-time model download (about 2.5–3 GB). Inference is local; no Gemini API key is used. Keep the phone cool and close other apps if memory is tight.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text(modelStatus, color = if (modelStatus.startsWith("Ready")) Cyan else Soft, fontSize = 11.sp)
+                    Button(
+                        onClick = {
+                            if (!modelBusy && !LocalLlmService.isLoaded()) {
+                                modelBusy = true
+                                modelStatus = "Starting model download…"
+                                LocalLlmService.downloadAndLoad(context, { modelStatus = it }) { result ->
+                                    modelBusy = false
+                                    modelStatus = result.fold(
+                                        { "Ready — Qwen3 is running on-device." },
+                                        { "Model unavailable: ${it.message ?: "download or load failed"}" }
+                                    )
+                                    statusText = if (result.isSuccess) "Local AI ready" else "Offline fallback ready"
+                                }
+                            }
+                        },
+                        enabled = !modelBusy && !LocalLlmService.isLoaded(),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)
+                    ) { Text(if (modelBusy) "Preparing model…" else if (LocalLlmService.isLoaded()) "Local model ready" else "Download & enable Qwen3", color = Cyan) }
+                    Text("If the model is not installed, Munch continues using its built-in offline replies. Model download requires internet once; chat inference does not.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
                     TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
                         Text("Clear conversation history", color = Violet)
@@ -423,11 +446,24 @@ private fun runAssistantRequest(
             } else setStatus("Try: remind me in 10 minutes to call home.")
         }
         else -> {
-            val answer = OfflineAssistant.respond(prompt)
-            messages.add(ChatLine("assistant", answer))
-            AssistantServices.saveMessage(context, "assistant", answer)
-            setStatus("Offline assistant")
-            activity.speak(answer)
+            if (LocalLlmService.isLoaded()) {
+                setBusy(true)
+                setStatus("Thinking on-device…")
+                LocalLlmService.generate(prompt) { generated ->
+                    val answer = generated.ifBlank { OfflineAssistant.respond(prompt) }
+                    messages.add(ChatLine("assistant", answer))
+                    AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(if (generated.isBlank()) "Local fallback response" else "Answered on-device")
+                    activity.speak(answer)
+                    setBusy(false)
+                }
+            } else {
+                val answer = OfflineAssistant.respond(prompt)
+                messages.add(ChatLine("assistant", answer))
+                AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus("Offline assistant")
+                activity.speak(answer)
+            }
         }
     }
 }
