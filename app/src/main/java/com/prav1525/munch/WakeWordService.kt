@@ -589,11 +589,10 @@ class WakeWordService : Service() {
         private const val CHANNEL_ID = "munch_wake_listener"
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
-        private const val DETECTOR_FALLBACK_DELAY_MS = 20_000L
         private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
-        // Sensitivity is evaluated in our callback; this lower internal threshold is needed
-        // for quieter utterances to reach it at all.
+        // Keep the detector permissive enough for quiet speech; media-aware gating is applied
+        // in the callback after the VAD-filtered classifier score arrives.
         private const val DETECTOR_CALLBACK_THRESHOLD = 0.30f
         private const val WAKE_THRESHOLD = 0.43f
         private const val MEDIA_PLAYING_WAKE_THRESHOLD = 0.62f
