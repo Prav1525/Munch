@@ -315,7 +315,7 @@ private fun MunchHome(activity: MainActivity) {
                     }
                     Text("Choose an installed English voice. British voices are listed first; voice gender labels depend on your phone's speech engine.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Local-first hybrid AI", color = Cyan, fontWeight = FontWeight.SemiBold)
-                    Text("Munch handles supported commands and simple questions locally first. When a question is outside the offline responder, it can use Groq only if you enable online fallback below. Your API key is stored in app-private preferences; it is not bundled into the source code.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Native actions such as opening apps, music search, Maps and reminders run locally first. For open-ended questions, Groq is the primary AI when a key is saved and online AI is enabled; if it fails, Munch gives a concise offline fallback. Your API key is stored in app-private preferences, not bundled into source code.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     OutlinedTextField(
                         value = groqApiKey,
                         onValueChange = { groqApiKey = it; AssistantServices.saveGroqApiKey(context, it) },
