@@ -205,7 +205,10 @@ class WakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(
                     RecognizerIntent.EXTRA_LANGUAGE,
-                    if (preferSystemRecognizer) Locale.US.toLanguageTag() else Locale("en", "IN").toLanguageTag()
+                    // The user speaks English, and en-IN repeatedly produced Android
+                    // ERROR_LANGUAGE_UNAVAILABLE (13) on the target device. Prefer the widely
+                    // available US-English pack for both on-device and system recognition.
+                    Locale.US.toLanguageTag()
                 )
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
