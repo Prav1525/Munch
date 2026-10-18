@@ -480,9 +480,16 @@ private fun runAssistantRequest(
             } else setStatus("Try: remind me in 10 minutes to call home.")
         }
         else -> {
-            if (LocalLlmService.isLoaded()) {
+            // Avoid model startup/inference for greetings, time/date, thanks, and other known quick intents.
+            val instantAnswer = OfflineAssistant.respondInstant(prompt)
+            if (instantAnswer != null) {
+                messages.add(ChatLine("assistant", instantAnswer))
+                AssistantServices.saveMessage(context, "assistant", instantAnswer)
+                setStatus("Instant offline reply")
+                activity.speak(instantAnswer)
+            } else if (LocalLlmService.isLoaded()) {
                 setBusy(true)
-                setStatus("Thinking on-device…")
+                setStatus("Generating short reply…")
                 LocalLlmService.generate(prompt) { generated ->
                     val answer = generated.ifBlank { OfflineAssistant.respond(prompt) }
                     messages.add(ChatLine("assistant", answer))
