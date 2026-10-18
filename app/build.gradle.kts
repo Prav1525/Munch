@@ -83,9 +83,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.media:media:1.7.0")
-    // AndroidWakeWord is a multi-module JitPack repository; include the module coordinate
-    // so the Android library (and WakeWordDetector API) is actually on the app compile classpath.
-    implementation("com.github.Suxsem.AndroidWakeWord:AndroidWakeWord:v0.0.1")
+    // Use the coordinate documented by AndroidWakeWord for its v0.0.1 release.
+    implementation("com.github.suxsem:AndroidWakeWord:v0.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
