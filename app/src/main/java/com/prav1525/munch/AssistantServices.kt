@@ -2,6 +2,8 @@ package com.prav1525.munch
 
 import android.app.AlarmManager
 import android.app.PendingIntent
+import android.media.AudioManager
+import android.view.KeyEvent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -259,6 +261,36 @@ object AssistantServices {
         runCatching {
             context.startActivity(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC).addFlags(flags))
         }
+    }
+
+    /**
+     * Opens YouTube Music and asks Android's active media session to resume playback.
+     * This can resume an existing queue; it cannot choose a song when no queue exists.
+     */
+    fun openMusicAndResume(context: Context): Boolean {
+        val packageName = "com.google.android.apps.youtube.music"
+        val launch = context.packageManager.getLaunchIntentForPackage(packageName)
+        val opened = if (launch != null) {
+            runCatching {
+                context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
+        } else {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
+        }
+        if (!opened) return false
+        Handler(Looper.getMainLooper()).postDelayed({
+            runCatching {
+                val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
+                audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+            }
+        }, 1_200L)
+        return true
     }
 
     /** Open common installed apps through Android intents. This launches apps; it does not grant
