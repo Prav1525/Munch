@@ -560,7 +560,7 @@ private fun runAssistantRequest(
                     setBusy(false)
                     val answer = when {
                         !opened -> "I couldn't open YouTube. Please check that YouTube is installed."
-                        autoPlay -> "Playing $requestedSong on YouTube."
+                        autoPlay -> "Opening a YouTube video for $requestedSong. Playback depends on YouTube."
                         else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
                     }
                     messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
@@ -582,7 +582,7 @@ private fun runAssistantRequest(
                 setBusy(false)
                 val answer = when {
                     !opened -> "I couldn't open YouTube."
-                    autoPlay -> "Playing $query on YouTube."
+                    autoPlay -> "Opening a YouTube video for $query. Playback depends on YouTube."
                     else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
                 }
                 messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
