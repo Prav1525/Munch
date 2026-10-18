@@ -5,59 +5,61 @@
 - Repository: https://github.com/Prav1525/Munch
 - Default branch: main.
 
-## Product vision and long-term direction
-Munch starts as a motorcycle/bike assistant and is intentionally designed to grow into a general-purpose assistant over time. This is a core product and architecture decision: build modular capabilities so general-assistant features can be added without rewriting the bike-assistant foundation. Keep riding safety and hands-free interaction central to the first version.
+## Product vision
+Munch is a **general-purpose personal assistant first**. It should feel futuristic, minimal, personal, and voice-first. Riding safety is an important use case, but the app must not be presented as only a bike assistant. Music, navigation, reminders, daily planning, and device-specific functions are optional modular capabilities that should not define the whole product.
 
-### Phased roadmap
-1. **Phase 1 — Bike assistant MVP:** voice interaction, music controls, Google Maps destination navigation, and Bluetooth neckband microphone/audio support.
-2. **Phase 2 — More capable riding assistant:** improve command handling, support offline voice commands where practical, and investigate reliable background operation within Android restrictions.
-3. **Phase 3 — General assistant:** add broader question answering, everyday tasks, and other assistant capabilities as separate modules.
+## Product roadmap
+1. **Personal assistant foundation:** polished conversation experience, user-initiated voice input, clear assistant states, and a flexible app shell.
+2. **Connected capabilities:** optional music controls, navigation, reminders, and device integrations.
+3. **Smarter assistant:** better context and personalization, practical offline features, and background behavior within Android limits.
 
-These phases are a roadmap, not a claim that features already exist. Implement and verify incrementally; do not silently treat planned features as completed.
+These are plans, not claims that features already exist. Keep the interface honest about what's implemented versus planned.
 
-## Agreed initial technical direction
+## Design direction
+- Futuristic, minimal, personal aesthetic.
+- Dark, near-black surfaces with restrained violet/cyan light accents, subtle borders, generous spacing, and a distinctive assistant orb.
+- General everyday assistant language; do not label the home screen as “bike assistant”.
+- Keep quick actions modular and clearly mark capabilities that are not connected yet.
+- Avoid clutter, overdone sci-fi decoration, and false “listening/online” indicators.
+
+## Agreed technical direction
 - Android app using Kotlin and Jetpack Compose.
-- Explore a wake phrase: “Munch”.
+- Start with user-initiated speech recognition; only investigate wake phrase “Munch” after the basic voice flow is stable.
 - Support offline voice commands where practical.
-- Music controls through compatible music apps: play, pause, skip, and search/request music.
+- Music controls through compatible apps: play, pause, skip, and search/request music.
 - Voice-based destination requests that open Google Maps navigation.
-- Use the user's OnePlus Bluetooth neckband for microphone and audio when connected.
-- Investigate a foreground service for background listening, respecting Android platform restrictions, permissions, battery use, and privacy.
-- Calls and broader general-assistant capabilities belong to later phases and must be added as separate modules, not treated as existing functionality.
-
-These are agreed goals, not implemented or verified features. Confirm technical feasibility as implementation proceeds; explain platform limits instead of promising unsupported always-on behavior.
+- Support the user's OnePlus Bluetooth neckband for microphone and audio when connected.
+- Investigate a foreground service for background listening only when justified, respecting Android restrictions, permissions, battery use, and privacy.
+- Calls and broader integrations should be separate capabilities, not hardwired into the home screen.
 
 ## Non-negotiable build, test, and APK rules
-- The user explicitly does not want repeated coding mistakes or an APK delivered without verification.
-- Inspect the current repository, history, and this file before making changes.
-- For every meaningful change, compile/build and run the available tests; fix failures and rerun the relevant checks.
+- The user explicitly requires compiling and testing before an APK is delivered.
+- Inspect the current repository and this file before making changes.
+- For meaningful changes, compile/build and run available tests; fix failures and rerun.
 - Never claim build, test, installation, or device-test success unless actually verified.
-- Only deliver an APK after a successful build. State the exact checks that passed and which checks were not performed.
-- If the available environment cannot build or test, explain the blocker clearly and do not call the app verified or fabricate an APK.
+- Only deliver an APK after a successful build. State which checks passed and which were not performed.
 - Emulator/build checks do not replace real-device tests for microphone input, OnePlus Bluetooth audio, wake-word performance, and motorcycle noise.
-- Track Android permissions, background-service restrictions, and privacy implications.
+- If the available environment cannot build or test, explain the blocker clearly and do not call the app verified or fabricate an APK.
 
 ## Persistent continuity
-- Treat this file as the source of truth for project requirements and handoffs.
-- Do not make the user repeat decisions already recorded here.
-- After meaningful work, update this file with confirmed decisions, files changed, exact build/test commands and outcomes, blockers, and the next step.
-- Separate confirmed facts from plans, assumptions, and untested features.
+- Keep this file updated with confirmed decisions, code changes, test results, blockers, and the next step.
+- Do not ask the user to repeat decisions already recorded here.
+- Separate confirmed facts from plans and untested features.
 
 ## Current status (2026-10-18)
-- PROJECT_CONTEXT.md exists on the main branch.
-- Repository inspection on 2026-10-18 confirmed the repo previously contained only this context file; Android app files have now been added to main.
-- Initial scaffold committed: Kotlin + Jetpack Compose, Gradle Kotlin DSL configuration, Android manifest, a bike-assistant home screen, an explicit three-phase roadmap model, unit tests, README, .gitignore, and a GitHub Actions build/test/APK-artifact workflow.
-- Current UI is a prototype shell only. Microphone, wake-word detection, music control, Google Maps navigation, and Bluetooth headset integration are not implemented yet.
-- Verified on 2026-10-18: GitHub Actions run https://github.com/Prav1525/Munch/actions/runs/39100218318 completed successfully. Its 'Compile, test, and assemble debug APK' step and 'Upload debug APK' step both passed. The workflow uploaded the `munch-debug-apk` artifact (artifact ID 12125842970; 9,035,721 bytes; SHA-256 `38efcbadb414fe245050559a09a99d7430745987cac75abb5fdf9a2593446a72`). This confirms the scaffold compiles, unit tests pass, and a debug APK was assembled. Installation and real-device verification have not been performed.
-- Local build verification was attempted by cloning the repository, but this environment could not resolve github.com (network/DNS unavailable). GitHub Actions has now started build/test workflow runs for the scaffold commits. At the latest check, runs were still in progress and no pass/fail conclusion was available yet.
-- The phased bike-assistant-to-general-assistant roadmap is recorded here and in README.md.
+- User installed the initial debug APK and reported that it works, but described the UI as too simple.
+- Initial scaffold CI run passed: https://github.com/Prav1525/Munch/actions/runs/39100218318. It ran `gradle --no-daemon testDebugUnitTest assembleDebug` and uploaded the debug APK. This verifies the initial scaffold only, not the latest redesign.
+- The user clarified the product should look futuristic, minimal, and personal, and should be a general assistant rather than a bike-only assistant.
+- Latest changes committed to `main`: redesigned `MainActivity.kt` with dark personal-assistant UI, gradient orb, conversation entry point and modular shortcut cards; updated `AssistantRoadmap.kt` to make the personal assistant foundation the first phase; updated roadmap unit tests.
+- The redesign's CI build/test status must be checked before delivering another APK. The shortcut cards and conversation button are visual preview entry points only; microphone, voice chat, AI answers, music, navigation, and reminders are not connected yet.
+- Previous debug APK installation was confirmed by the user. Microphone, Bluetooth, and actual assistant capability tests have not been performed.
 
 ## Handoff checklist
-1. Fetch this file and inspect the latest repository contents and history.
-2. Identify whether an Android project already exists before initializing anything.
-3. Implement a small, testable first milestone; do not silently expand scope.
-4. Build and test, fix errors, and repeat checks before packaging.
-5. Update this file with verified results and the next concrete step before ending the session.
+1. Read this file and inspect the latest source before editing.
+2. Make one testable milestone at a time.
+3. Run GitHub Actions build, unit tests, and debug APK assembly; fix and rerun if any check fails.
+4. Update this file with exact outcomes and the next step before ending.
+5. Deliver a new APK only after the latest commit's build/tests pass.
 
 ## Next step
-Download the `munch-debug-apk` artifact from the successful GitHub Actions run and install/test it on a device before treating it as device-verified. Then continue the first functional milestone: microphone permission and a clearly user-initiated speech-to-text command flow, followed by music/navigation integrations. Keep wake-word and always-on listening claims gated on implementation and real-device testing.
+Check CI for the latest redesign commits. If green, provide the new debug APK and ask the user to confirm the new look. Then implement the first functional conversation milestone: microphone permission plus a user-initiated speech-to-text flow with visible listening/result/error states. Do not claim AI conversation until an answer engine is integrated.
