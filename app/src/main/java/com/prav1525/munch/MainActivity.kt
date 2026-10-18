@@ -77,6 +77,8 @@ class MainActivity : ComponentActivity() {
     private var pushToTalkHandler: (() -> Unit)? = null
     var wakeIntentVersion by mutableStateOf(0)
         private set
+    var spotifyAuthVersion by mutableStateOf(0)
+        private set
 
     fun setPushToTalkHandler(handler: (() -> Unit)?) {
         pushToTalkHandler = handler
@@ -85,7 +87,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        SpotifyAgent.handleRedirect(this, intent.data)
+        SpotifyAgent.handleRedirect(this, intent.data) { spotifyAuthVersion++ }
         // Re-trigger Compose state updates when Android reuses the existing Activity.
         wakeIntentVersion++
     }
@@ -107,7 +109,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        SpotifyAgent.handleRedirect(this, intent?.data)
+        SpotifyAgent.handleRedirect(this, intent?.data) { spotifyAuthVersion++ }
         selectedVoiceName = getSharedPreferences("munch_preferences", MODE_PRIVATE).getString("tts_voice_name", null)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -425,7 +427,7 @@ private fun MunchHome(activity: MainActivity) {
                             else if (SpotifyAgent.connect(context)) "Finish sign-in in Spotify, then return to Munch."
                             else "Could not open Spotify sign-in. Check the Client ID."
                     }) { Text("Connect Spotify", color = Violet) }
-                    LaunchedEffect(activity.wakeIntentVersion) {
+                    LaunchedEffect(activity.wakeIntentVersion, activity.spotifyAuthVersion) {
                         spotifyStatus = SpotifyAgent.getStatus(context)
                     }
                     Text("Music app control", color = Cyan, fontWeight = FontWeight.SemiBold)
