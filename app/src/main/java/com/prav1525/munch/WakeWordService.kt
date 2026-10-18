@@ -451,5 +451,6 @@ class WakeWordService : Service() {
         private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
         private const val WAKE_THRESHOLD = 0.55f
+        private const val MEDIA_PLAYING_WAKE_THRESHOLD = 0.70f
     }
 }
