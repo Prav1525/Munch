@@ -139,6 +139,42 @@ object AssistantServices {
             }
     }
 
+    /** Open common installed apps through Android intents. This launches apps; it does not grant
+     * unrestricted control over them. Sensitive actions remain in the target app for confirmation. */
+    fun openExternalApp(context: Context, app: String): Boolean {
+        val normalized = app.trim().lowercase()
+        val intent = when (normalized) {
+            "whatsapp" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/"))
+            "youtube" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com"))
+            "browser", "chrome", "internet" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
+            "camera" -> Intent("android.media.action.IMAGE_CAPTURE")
+            "phone", "dialer", "call" -> Intent(Intent.ACTION_DIAL)
+            "messages", "sms", "text messages" -> Intent(Intent.ACTION_VIEW, Uri.parse("smsto:"))
+            "calendar" -> Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)
+            "settings" -> Intent(android.provider.Settings.ACTION_SETTINGS)
+            "contacts" -> Intent(Intent.ACTION_VIEW, Uri.parse("content://contacts/people/"))
+            "gmail", "email", "mail" -> Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+            "clock", "alarm" -> Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+            else -> return false
+        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching {
+            context.startActivity(intent)
+            true
+        }.getOrElse {
+            // If a deep link cannot be handled, use the generic app launcher where possible.
+            val packageName = when (normalized) {
+                "whatsapp" -> "com.whatsapp"
+                "youtube" -> "com.google.android.youtube"
+                "chrome", "browser", "internet" -> "com.android.chrome"
+                "gmail", "email", "mail" -> "com.google.android.gm"
+                else -> null
+            }
+            val launch = packageName?.let { context.packageManager.getLaunchIntentForPackage(it) }
+                ?: return false
+            runCatching { context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true }.getOrDefault(false)
+        }
+    }
+
     fun scheduleReminder(context: Context, message: String, triggerAtMillis: Long): Boolean {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) return false
