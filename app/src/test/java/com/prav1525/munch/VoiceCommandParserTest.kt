@@ -43,6 +43,19 @@ class VoiceCommandParserTest {
     }
 
     @Test
+    fun parsesOfflineJarvisDeviceSkills() {
+        assertEquals("time", VoiceCommandParser.deviceCommand("Hey Jarvis, what time is it?"))
+        assertEquals("date", VoiceCommandParser.deviceCommand("what's the date"))
+        assertEquals("battery", VoiceCommandParser.deviceCommand("what is my battery level"))
+        assertEquals("volume_up", VoiceCommandParser.deviceCommand("turn volume up"))
+        assertEquals("volume_down", VoiceCommandParser.deviceCommand("quieter"))
+        assertEquals("mute", VoiceCommandParser.deviceCommand("mute media"))
+        assertEquals("unmute", VoiceCommandParser.deviceCommand("unmute"))
+        assertEquals("help", VoiceCommandParser.deviceCommand("what can you do"))
+        assertNull(VoiceCommandParser.deviceCommand("tell me a story"))
+    }
+
+    @Test
     fun preservesWordsThatContainWakeName() {
         assertEquals("munch is a word in this sentence", VoiceCommandParser.stripWakePhrase("munch is a word in this sentence"))
     }
