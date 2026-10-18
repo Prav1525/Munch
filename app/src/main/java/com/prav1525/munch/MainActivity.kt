@@ -382,7 +382,7 @@ private fun MunchHome(activity: MainActivity) {
             containerColor = SurfaceDark,
             title = { Text("Munch settings", color = White) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Assistant voice", color = Cyan, fontWeight = FontWeight.SemiBold)
                     TextButton(onClick = { selectedVoiceLabel = activity.currentVoiceName(); showVoicePicker = true }) {
                         Text(selectedVoiceLabel, color = White)
