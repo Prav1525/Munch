@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -22,6 +24,73 @@ object AssistantServices {
     private const val PREFS = "munch_preferences"
     private const val HISTORY = "conversation_history"
     private const val API_KEY = "gemini_api_key"
+    private const val GROQ_API_KEY = "groq_api_key"
+    private const val GROQ_FALLBACK_ENABLED = "groq_fallback_enabled"
+
+    fun getGroqApiKey(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(GROQ_API_KEY, "").orEmpty()
+
+    fun saveGroqApiKey(context: Context, key: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(GROQ_API_KEY, key.trim()).apply()
+    }
+
+    fun isGroqFallbackEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(GROQ_FALLBACK_ENABLED, false)
+
+    fun setGroqFallbackEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(GROQ_FALLBACK_ENABLED, enabled).apply()
+    }
+
+    /** Calls Groq only when explicitly enabled and configured. Callback is always delivered on main. */
+    fun askGroq(context: Context, prompt: String, callback: (Result<String>) -> Unit) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val key = prefs.getString(GROQ_API_KEY, "").orEmpty()
+        if (!prefs.getBoolean(GROQ_FALLBACK_ENABLED, false) || key.isBlank()) {
+            callback(Result.failure(IllegalStateException("Online fallback is disabled or no Groq API key is configured.")))
+            return
+        }
+        io.execute {
+            val result = runCatching {
+                val endpoint = URL("https://api.groq.com/openai/v1/chat/completions")
+                val connection = (endpoint.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 5000
+                    readTimeout = 10000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Authorization", "Bearer $key")
+                }
+                val messages = JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", "You are Munch, a concise personal assistant. Answer naturally, usually in one short sentence. Avoid filler. Do not claim to perform actions you have not performed."))
+                    .put(JSONObject().put("role", "user").put("content", prompt))
+                val body = JSONObject()
+                    .put("model", "openai/gpt-oss-20b")
+                    .put("messages", messages)
+                    .put("max_tokens", 64)
+                    .put("temperature", 0.3)
+                    .toString()
+                try {
+                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    val code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    if (code !in 200..299) {
+                        val detail = runCatching { JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("")
+                        throw IllegalStateException("Groq API error (HTTP $code)" + if (detail.isNotBlank()) ": ${detail.take(180)}" else ".")
+                    }
+                    val answer = JSONObject(raw).optJSONArray("choices")?.optJSONObject(0)
+                        ?.optJSONObject("message")?.optString("content").orEmpty().trim()
+                    if (answer.isBlank()) throw IllegalStateException("Groq returned an empty answer.")
+                    answer
+                } finally {
+                    connection.disconnect()
+                }
+            }
+            Handler(Looper.getMainLooper()).post { callback(result) }
+        }
+    }
 
     fun saveApiKey(context: Context, key: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
