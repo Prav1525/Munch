@@ -1,3 +1,5 @@
+import java.net.URL
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -51,7 +53,7 @@ val downloadHeyJarvisWakeModel = tasks.register("downloadHeyJarvisWakeModel") {
         val destination = modelFile.get().asFile
         if (!destination.exists()) {
             destination.parentFile.mkdirs()
-            java.net.URL("https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx")
+            URL("https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx")
                 .openStream().use { input ->
                     destination.outputStream().use { output -> input.copyTo(output) }
                 }
