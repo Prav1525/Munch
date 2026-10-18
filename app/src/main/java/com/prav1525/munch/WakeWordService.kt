@@ -148,7 +148,7 @@ class WakeWordService : Service() {
             val classifierAsset = if (customModelAvailable) {
                 CUSTOM_MODEL_ASSET
             } else {
-                "openwakeword/hey_jarvis_v0.1.onnx"
+                "hey_jarvis_v0.1.onnx"
             }
             val detector = WakeWordDetector(
                 context = applicationContext,
