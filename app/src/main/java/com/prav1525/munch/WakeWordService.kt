@@ -411,8 +411,8 @@ class WakeWordService : Service() {
             val opened = AssistantServices.searchMusic(this, query)
             val message = when {
                 !opened -> "I couldn't open YouTube Music search for $query."
-                MusicAppAssistService.isEnabled(this) -> "Opened YouTube Music search for $query. The enabled helper will try to select a matching visible result."
-                else -> "Opened YouTube Music search for $query. Enable Munch's YouTube Music helper in Accessibility settings for automatic result selection."
+                MusicAppAssistService.isEnabled(this) -> "Requested YouTube Music search for $query. The enabled helper will try to select a matching visible result; playback still needs confirmation."
+                else -> "Requested YouTube Music search for $query. Enable Munch's YouTube Music helper in Accessibility settings for automatic result selection."
             }
             report(message)
             return true
@@ -426,7 +426,7 @@ class WakeWordService : Service() {
             AssistantServices.playYouTubeSearch(this, query) { opened, autoPlay ->
                 report(when {
                     !opened -> "I couldn't open YouTube for $query."
-                    autoPlay -> "Opened a YouTube video for $query. Confirm playback in YouTube."
+                    autoPlay -> "Sent a YouTube video request for $query. Playback still needs confirmation in YouTube."
                     else -> "Opened YouTube, but automatic playback could not be confirmed for $query."
                 })
             }
@@ -438,7 +438,7 @@ class WakeWordService : Service() {
         if (openApp != null) {
             val app = openApp.groupValues[1].trim()
             val opened = AssistantServices.openInstalledApp(this, app)
-            report(if (opened) "Opened $app." else "I couldn't open an installed app named $app.")
+            report(if (opened) "Sent Android a request to open $app. If it does not appear, tap the Munch notification and try again." else "I couldn't open an installed app named $app.")
             return true
         }
 
