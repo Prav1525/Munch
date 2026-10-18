@@ -5,18 +5,24 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.content.Intent
+import android.media.AudioManager
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.view.KeyEvent
 import androidx.media.session.MediaButtonReceiver
+import androidx.core.content.ContextCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.content.pm.ServiceInfo
 import com.openwakeword.OpenWakeWord
 import java.util.Locale
@@ -39,10 +45,35 @@ class WakeWordService : Service() {
     private var handlingWake = false
     private var awaitingCommand = false
     private var mediaSession: MediaSessionCompat? = null
+    private var serviceTts: TextToSpeech? = null
+    private var serviceTtsReady = false
+    private var speakingResponse = false
+    private var pendingSpokenResponse: Pair<String, String?>? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        serviceTts = TextToSpeech(this) { status ->
+            mainHandler.post {
+                serviceTtsReady = status == TextToSpeech.SUCCESS
+                if (serviceTtsReady) {
+                    serviceTts?.language = Locale.UK
+                    serviceTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) = Unit
+                        override fun onError(utteranceId: String?) {
+                            mainHandler.post { finishSpokenResponse() }
+                        }
+                        override fun onDone(utteranceId: String?) {
+                            mainHandler.post { finishSpokenResponse() }
+                        }
+                    })
+                    pendingSpokenResponse?.let { (message, command) ->
+                        pendingSpokenResponse = null
+                        speakServiceResponse(message, command)
+                    }
+                }
+            }
+        }
         // Keep a media session active while the user-enabled foreground listener runs so
         // Bluetooth/headset media buttons can reach Munch even when its Activity is hidden.
         mediaSession = MediaSessionCompat(this, "MunchNeckband").apply {
@@ -58,12 +89,14 @@ class WakeWordService : Service() {
                     return when (event.keyCode) {
                         KeyEvent.KEYCODE_HEADSETHOOK,
                         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                        KeyEvent.KEYCODE_MEDIA_PLAY,
-                        KeyEvent.KEYCODE_MEDIA_NEXT,
-                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                        KeyEvent.KEYCODE_MEDIA_PLAY -> {
                             launchVoiceFromNeckband()
                             true
                         }
+                        // Never turn a skip button press into a voice wake. Let Android route
+                        // next/previous to the active music app whenever possible.
+                        KeyEvent.KEYCODE_MEDIA_NEXT,
+                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> false
                         else -> super.onMediaButtonEvent(mediaButtonIntent)
                     }
                 }
@@ -94,9 +127,14 @@ class WakeWordService : Service() {
     }
 
     private fun startRecognition() {
-        if (listening || dedicatedDetectorActive || handlingWake ||
+        if (speakingResponse || listening || dedicatedDetectorActive || handlingWake || awaitingCommand ||
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            updateNotification("Microphone permission required — open Munch to enable")
+            return
+        }
 
         if (forceSpeechFallback) {
             startSpeechRecognition()
@@ -123,25 +161,29 @@ class WakeWordService : Service() {
                 else "Offline “Hey Jarvis” detector active (temporary model)"
             )
             detector.start { score ->
-                if (score >= WAKE_THRESHOLD && dedicatedDetectorActive && !handlingWake) {
-                    handleDedicatedWake()
+                // The detector callback may run on its audio thread. Serialize state changes
+                // and SpeechRecognizer handoff on the main thread, and guard duplicate triggers.
+                // Media lyrics and music can resemble the wake phrase. Raise the
+                // acceptance threshold while Android reports active media playback.
+                val mediaActive = runCatching {
+                    (getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager).isMusicActive
+                }.getOrDefault(false)
+                val requiredScore = if (mediaActive) MUSIC_WAKE_THRESHOLD else WAKE_THRESHOLD
+                if (score >= requiredScore) {
+                    mainHandler.post {
+                        if (dedicatedDetectorActive && !handlingWake && !awaitingCommand && !speakingResponse) {
+                            handleDedicatedWake()
+                        }
+                    }
                 }
             }
-            // Avoid silently waiting forever if the detector's audio pipeline is unsupported.
-            mainHandler.postDelayed({
-                if (dedicatedDetectorActive && !handlingWake) {
-                    dedicatedDetectorActive = false
-                    forceSpeechFallback = true
-                    runCatching { wakeDetector?.stop() }
-                    runCatching { wakeDetector?.release() }
-                    wakeDetector = null
-                    updateNotification("Using speech fallback — say Hey Jarvis")
-                    startSpeechRecognition()
-                }
-            }, DETECTOR_FALLBACK_DELAY_MS)
+            // Do not time out a healthy detector just because no wake phrase was spoken.
+            // Fall back only when initialization/start actually throws, which is handled below.
             return
         } catch (_: Exception) {
             dedicatedDetectorActive = false
+            forceSpeechFallback = true
+            runCatching { wakeDetector?.stop() }
             runCatching { wakeDetector?.release() }
             wakeDetector = null
             updateNotification("Wake detector unavailable — using speech fallback")
@@ -154,7 +196,7 @@ class WakeWordService : Service() {
         runCatching { assets.list("")?.contains(CUSTOM_MODEL_ASSET) == true }.getOrDefault(false)
 
     private fun startSpeechRecognition() {
-        if (listening || handlingWake ||
+        if (speakingResponse || listening || handlingWake ||
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
@@ -250,14 +292,17 @@ class WakeWordService : Service() {
             val phrases = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
             if (awaitingCommand) {
                 awaitingCommand = false
-                val command = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+                val recognized = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+                val command = VoiceCommandParser.stripWakePhrase(recognized)
                 if (command.isNotBlank()) {
-                    val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        putExtra("munch_wake_command", command)
+                    if (!handleCommandInService(command)) {
+                        val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                            putExtra("munch_wake_command", command)
+                        }
+                        updateNotification("Command heard — tap to run", command)
+                        runCatching { startActivity(launch) }
                     }
-                    updateNotification("Command heard — tap to run", command)
-                    runCatching { startActivity(launch) }
                 } else {
                     updateNotification("No command heard — listening again")
                 }
@@ -323,12 +368,152 @@ class WakeWordService : Service() {
         }, COMMAND_CAPTURE_TIMEOUT_MS)
     }
 
+    /**
+     * Execute media transport commands in the foreground service. This deliberately avoids
+     * launching MainActivity over the current player for next/pause/resume follow-ups.
+     */
+    private fun handleMediaCommandInService(rawCommand: String): Boolean {
+        val normalized = VoiceCommandParser.mediaCommand(rawCommand) ?: return false
+
+        // Prefer Spotify's supported playback API when connected; generic Android media keys
+        // are the fallback for YouTube Music and other active media sessions.
+        if (SpotifyAgent.isConnected(this)) {
+            val spotifyCommand = if (normalized == "toggle") "toggle" else normalized
+            SpotifyAgent.controlPlayback(this, spotifyCommand) { result ->
+                val message = result.getOrElse {
+                    "Spotify playback command failed: " + (it.message ?: "open Spotify and start playback first")
+                }
+                deliverServiceResponse(message, rawCommand)
+            }
+            updateNotification("Sending $normalized command to Spotify", rawCommand)
+            return true
+        }
+
+        val sent = AssistantServices.sendMediaCommand(
+            this,
+            if (normalized == "toggle") "toggle playback" else normalized
+        )
+        val message = when {
+            !sent -> "Could not send $normalized command to the active media player"
+            normalized == "next" -> "Next-track command sent to the active media player"
+            normalized == "previous" -> "Previous-track command sent to the active media player"
+            normalized == "pause" -> "Pause command sent to the active media player"
+            normalized == "resume" -> "Play command sent to the active media player"
+            else -> "Playback toggle command sent to the active media player"
+        }
+        deliverServiceResponse(message, rawCommand)
+        return true
+    }
+
+    /**
+     * Executes supported, low-risk commands directly from the foreground service. This is
+     * the key hands-free path: common tasks do not depend on MainActivity being allowed to open.
+     * Complex or ambiguous requests still go to the Activity/assistant UI.
+     */
+    private fun handleCommandInService(rawCommand: String): Boolean {
+        if (handleMediaCommandInService(rawCommand)) return true
+        val command = VoiceCommandParser.stripWakePhrase(rawCommand)
+            .trim().trimEnd('.', '!', '?')
+        if (command.isBlank()) return false
+
+        fun report(message: String) {
+            deliverServiceResponse(message, command)
+        }
+
+        // Answer simple device questions and controls locally, even with the app UI closed.
+        DeviceCommandActions.execute(this, command)?.let { message ->
+            report(message)
+            return true
+        }
+
+        val spotifyPlay = Regex("^play\\s+(.+?)\\s+on\\s+spotify$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (spotifyPlay != null) {
+            val query = spotifyPlay.groupValues[1].trim()
+            if (!SpotifyAgent.isConnected(this)) {
+                report("Spotify is not connected to Munch. Connect it in Settings before asking me to play $query.")
+            } else {
+                updateNotification("Searching Spotify for $query…", command)
+                SpotifyAgent.searchAndPlay(this, query) { result ->
+                    report(result.getOrElse { "Spotify could not play $query: " + (it.message ?: "unknown error") })
+                }
+            }
+            return true
+        }
+
+        val youtubeMusicPlay = Regex("^play\\s+(.+?)\\s+on\\s+(?:youtube music|yt music|ytmusic)$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (youtubeMusicPlay != null) {
+            val query = youtubeMusicPlay.groupValues[1].trim()
+            val opened = AssistantServices.searchMusic(this, query)
+            val message = when {
+                !opened -> "I couldn't open YouTube Music search for $query."
+                MusicAppAssistService.isEnabled(this) -> "Requested YouTube Music search for $query. The enabled helper will try to select a matching visible result; playback still needs confirmation."
+                else -> "Requested YouTube Music search for $query. Enable Munch's YouTube Music helper in Accessibility settings for automatic result selection."
+            }
+            report(message)
+            return true
+        }
+
+        val youtubePlay = Regex("^play\\s+(.+?)\\s+on\\s+youtube$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (youtubePlay != null) {
+            val query = youtubePlay.groupValues[1].trim()
+            updateNotification("Finding a YouTube result for $query…", command)
+            AssistantServices.playYouTubeSearch(this, query) { opened, autoPlay ->
+                report(when {
+                    !opened -> "I couldn't open YouTube for $query."
+                    autoPlay -> "Sent a YouTube video request for $query. Playback still needs confirmation in YouTube."
+                    else -> "Opened YouTube, but automatic playback could not be confirmed for $query."
+                })
+            }
+            return true
+        }
+
+        val openApp = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(.+)$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (openApp != null) {
+            val app = openApp.groupValues[1].trim()
+            val opened = AssistantServices.openInstalledApp(this, app)
+            report(if (opened) "Sent Android a request to open $app. If it does not appear, tap the Munch notification and try again." else "I couldn't open an installed app named $app.")
+            return true
+        }
+
+        val reminder = Regex("^remind me in (\\d+)\\s*(minute|minutes|min|hour|hours|hr|hrs)\\s*(?:to)?\\s*(.*)$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (reminder != null) {
+            val amount = reminder.groupValues[1].toLongOrNull() ?: 0L
+            val unit = reminder.groupValues[2].lowercase(Locale.ROOT)
+            val note = reminder.groupValues[3].ifBlank { "Your reminder" }
+            val multiplier = if (unit.startsWith("h")) 3_600_000L else 60_000L
+            val delay = runCatching { Math.multiplyExact(amount, multiplier) }.getOrDefault(0L)
+            if (delay <= 0L) {
+                report("Please give me a valid reminder time.")
+            } else {
+                val scheduled = runCatching {
+                    AssistantServices.scheduleReminder(this, note, System.currentTimeMillis() + delay)
+                }.getOrDefault(false)
+                report(if (scheduled) "Reminder set: $note in ${reminder.groupValues[1]} ${reminder.groupValues[2]}."
+                    else "I couldn't schedule that reminder. Check Android's exact-alarm permission.")
+            }
+            return true
+        }
+        return false
+    }
+
     private fun handlePhrase(phrase: String) {
         val match = Regex(".*?\\bhey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
             ?: return
         if (handlingWake) return
         handlingWake = true
         val command = match.groupValues.getOrElse(1) { "" }.trim().trim(',', '.', '!', '?')
+        // Media transport commands are handled inside the foreground service so the
+        // music app stays foreground instead of being covered by Munch's activity.
+        if (command.isNotBlank() && handleCommandInService(command)) {
+            handlingWake = false
+            mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+            return
+        }
         val launch = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             if (command.isNotBlank()) putExtra("munch_wake_command", command)
@@ -341,6 +526,46 @@ class WakeWordService : Service() {
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
         // Cancellation can suppress the normal onResults callback, so schedule recovery here too.
         mainHandler.postDelayed({ startRecognition() }, 12_000)
+    }
+
+    /** Publish a final action result in the notification/history and speak it hands-free. */
+    private fun deliverServiceResponse(message: String, command: String? = null) {
+        updateNotification(message, command)
+        AssistantServices.saveMessage(this, "assistant", message)
+        if (!getSharedPreferences("munch_preferences", MODE_PRIVATE)
+                .getBoolean("wake_word_enabled", false)) return
+        if (!serviceTtsReady) {
+            pendingSpokenResponse = message to command
+            return
+        }
+        speakServiceResponse(message, command)
+    }
+
+    private fun speakServiceResponse(message: String, command: String?) {
+        val tts = serviceTts ?: return
+        // Stop microphone capture before speaking so the detector cannot hear its own reply.
+        speakingResponse = true
+        runCatching { wakeDetector?.stop() }
+        runCatching { wakeDetector?.release() }
+        wakeDetector = null
+        dedicatedDetectorActive = false
+        listening = false
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
+        recognizer = null
+        val result = runCatching {
+            tts.speak(message.take(350), TextToSpeech.QUEUE_FLUSH, null, "munch-service-response")
+        }.getOrDefault(TextToSpeech.ERROR)
+        if (result == TextToSpeech.ERROR) finishSpokenResponse()
+    }
+
+    private fun finishSpokenResponse() {
+        if (!speakingResponse) return
+        speakingResponse = false
+        if (getSharedPreferences("munch_preferences", MODE_PRIVATE)
+                .getBoolean("wake_word_enabled", false)) {
+            mainHandler.postDelayed({ startRecognition() }, 700L)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -392,6 +617,10 @@ class WakeWordService : Service() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
+        speakingResponse = false
+        serviceTts?.stop()
+        serviceTts?.shutdown()
+        serviceTts = null
         listening = false
         recognizer?.cancel()
         recognizer?.destroy()
@@ -414,9 +643,9 @@ class WakeWordService : Service() {
         private const val CHANNEL_ID = "munch_wake_listener"
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
-        private const val DETECTOR_FALLBACK_DELAY_MS = 20_000L
-        private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
+                private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
         private const val WAKE_THRESHOLD = 0.55f
+        private const val MUSIC_WAKE_THRESHOLD = 0.76f
     }
 }
