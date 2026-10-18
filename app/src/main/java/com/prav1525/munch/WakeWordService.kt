@@ -61,12 +61,14 @@ class WakeWordService : Service() {
                     return when (event.keyCode) {
                         KeyEvent.KEYCODE_HEADSETHOOK,
                         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                        KeyEvent.KEYCODE_MEDIA_PLAY,
-                        KeyEvent.KEYCODE_MEDIA_NEXT,
-                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                        KeyEvent.KEYCODE_MEDIA_PLAY -> {
                             launchVoiceFromNeckband()
                             true
                         }
+                        // Never turn a skip button press into a voice wake. Let Android route
+                        // next/previous to the active music app whenever possible.
+                        KeyEvent.KEYCODE_MEDIA_NEXT,
+                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> false
                         else -> super.onMediaButtonEvent(mediaButtonIntent)
                     }
                 }
@@ -337,26 +339,34 @@ class WakeWordService : Service() {
      * launching MainActivity over the current player for next/pause/resume follow-ups.
      */
     private fun handleMediaCommandInService(rawCommand: String): Boolean {
-        val command = VoiceCommandParser.stripWakePhrase(rawCommand)
-            .lowercase(java.util.Locale.ROOT)
-            .trim()
-            .trimEnd('.', '!', '?')
-        val normalized = when {
-            Regex("^(?:please\\s+)?(?:next|skip)(?:\\s+(?:song|track|music))?$").matches(command) -> "next"
-            Regex("^(?:please\\s+)?(?:previous|go back|last)(?:\\s+(?:song|track|music))?$").matches(command) -> "previous"
-            command in setOf("pause", "pause music", "stop music") -> "pause"
-            command in setOf("resume", "resume music", "continue music", "continue playing") -> "resume"
-            command in setOf("play pause", "toggle playback", "toggle music") -> "toggle playback"
-            else -> return false
+        val normalized = VoiceCommandParser.mediaCommand(rawCommand) ?: return false
+
+        // Prefer Spotify's supported playback API when connected; generic Android media keys
+        // are the fallback for YouTube Music and other active media sessions.
+        if (SpotifyAgent.isConnected(this)) {
+            val spotifyCommand = if (normalized == "toggle") "toggle" else normalized
+            SpotifyAgent.controlPlayback(this, spotifyCommand) { result ->
+                val message = result.getOrElse {
+                    "Spotify playback command failed: " + (it.message ?: "open Spotify and start playback first")
+                }
+                updateNotification(message, rawCommand)
+                AssistantServices.saveMessage(this, "assistant", message)
+            }
+            updateNotification("Sending $normalized command to Spotify", rawCommand)
+            return true
         }
-        val sent = AssistantServices.sendMediaCommand(this, normalized)
+
+        val sent = AssistantServices.sendMediaCommand(
+            this,
+            if (normalized == "toggle") "toggle playback" else normalized
+        )
         val message = when {
-            !sent -> "Could not send $normalized command to the media player"
-            normalized == "next" -> "Next-track command sent"
-            normalized == "previous" -> "Previous-track command sent"
-            normalized == "pause" -> "Pause command sent"
-            normalized == "resume" -> "Play command sent"
-            else -> "Playback toggle command sent"
+            !sent -> "Could not send $normalized command to the active media player"
+            normalized == "next" -> "Next-track command sent to the active media player"
+            normalized == "previous" -> "Previous-track command sent to the active media player"
+            normalized == "pause" -> "Pause command sent to the active media player"
+            normalized == "resume" -> "Play command sent to the active media player"
+            else -> "Playback toggle command sent to the active media player"
         }
         updateNotification(message, rawCommand)
         AssistantServices.saveMessage(this, "assistant", message)
