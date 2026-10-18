@@ -324,17 +324,17 @@ class WakeWordService : Service() {
         if (handlingWake) return
         handlingWake = true
         val command = match.groupValues.getOrElse(1) { "" }.trim().trim(',', '.', '!', '?')
-        val launch = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            if (command.isNotBlank()) putExtra("munch_wake_command", command)
-            else putExtra("munch_wake_listen", true)
+        if (command.isNotBlank()) {
+            dispatchCapturedCommand(command)
+        } else {
+            val launch = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                putExtra("munch_wake_listen", true)
+            }
+            updateNotification("Wake phrase heard — say your command", listen = true)
+            runCatching { startActivity(launch) }
         }
-        // Android can block activity launches from background services on some versions.
-        // The persistent notification remains tappable as a reliable fallback.
-        updateNotification("Wake phrase heard — tap to continue", command, command.isBlank())
-        runCatching { startActivity(launch) }
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
-        // Cancellation can suppress the normal onResults callback, so schedule recovery here too.
         mainHandler.postDelayed({ startRecognition() }, 12_000)
     }
 
