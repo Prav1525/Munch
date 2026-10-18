@@ -82,8 +82,8 @@ class WakeWordService : Service() {
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
         override fun onEndOfSpeech() {
+            // Wait for onResults/onError before restarting; restarting here races the recognizer.
             listening = false
-            mainHandler.postDelayed({ startRecognition() }, 400)
         }
         override fun onError(error: Int) {
             listening = false
@@ -92,16 +92,20 @@ class WakeWordService : Service() {
         override fun onResults(results: android.os.Bundle?) {
             listening = false
             val phrases = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-            val phrase = phrases.firstOrNull().orEmpty().trim()
-            handlePhrase(phrase)
-            mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else 400)
+            // Speech engines return alternatives; don't discard a valid wake phrase just because
+            // the first transcript was wrong.
+            val phrase = phrases.firstOrNull {
+                Regex("\\bhey[\\s,]+munch\\b", RegexOption.IGNORE_CASE).containsMatchIn(it)
+            } ?: phrases.firstOrNull().orEmpty()
+            handlePhrase(phrase.trim())
+            mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
         }
         override fun onPartialResults(partialResults: android.os.Bundle?) = Unit
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
     }
 
     private fun handlePhrase(phrase: String) {
-        val match = Regex(".*?\\bhey\\s+munch\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
+        val match = Regex(".*?\\bhey[\\s,]+munch\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
             ?: return
         if (handlingWake) return
         handlingWake = true
@@ -111,6 +115,9 @@ class WakeWordService : Service() {
             if (command.isNotBlank()) putExtra("munch_wake_command", command)
             else putExtra("munch_wake_listen", true)
         }
+        // Android can block activity launches from background services on some versions.
+        // The persistent notification remains tappable as a reliable fallback.
+        updateNotification("Heard “Hey Munch” — tap to open Munch")
         runCatching { startActivity(launch) }
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
     }
