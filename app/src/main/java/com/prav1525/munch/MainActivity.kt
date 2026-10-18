@@ -77,6 +77,8 @@ class MainActivity : ComponentActivity() {
     private var pushToTalkHandler: (() -> Unit)? = null
     var wakeIntentVersion by mutableStateOf(0)
         private set
+    var spotifyAuthVersion by mutableStateOf(0)
+        private set
 
     fun setPushToTalkHandler(handler: (() -> Unit)?) {
         pushToTalkHandler = handler
@@ -85,7 +87,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Re-trigger Compose wake handling when Android reuses the existing Activity.
+        SpotifyAgent.handleRedirect(this, intent.data) { spotifyAuthVersion++ }
+        // Re-trigger Compose state updates when Android reuses the existing Activity.
         wakeIntentVersion++
     }
 
@@ -106,6 +109,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SpotifyAgent.handleRedirect(this, intent?.data) { spotifyAuthVersion++ }
         selectedVoiceName = getSharedPreferences("munch_preferences", MODE_PRIVATE).getString("tts_voice_name", null)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -172,6 +176,8 @@ private fun MunchHome(activity: MainActivity) {
     var reminderMinutes by remember { mutableStateOf("10") }
     var prompt by remember { mutableStateOf("") }
     var groqApiKey by remember { mutableStateOf(AssistantServices.getGroqApiKey(context)) }
+    var spotifyClientId by remember { mutableStateOf(SpotifyAgent.getClientId(context)) }
+    var spotifyStatus by remember { mutableStateOf(SpotifyAgent.getStatus(context)) }
     var onlineFallbackEnabled by remember { mutableStateOf(AssistantServices.isGroqFallbackEnabled(context)) }
     var apiCallsToday by remember { mutableStateOf(AssistantServices.getApiCallsToday(context)) }
     var groqApiCallsToday by remember { mutableStateOf(AssistantServices.getGroqApiCallsToday(context)) }
@@ -376,7 +382,7 @@ private fun MunchHome(activity: MainActivity) {
             containerColor = SurfaceDark,
             title = { Text("Munch settings", color = White) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Assistant voice", color = Cyan, fontWeight = FontWeight.SemiBold)
                     TextButton(onClick = { selectedVoiceLabel = activity.currentVoiceName(); showVoicePicker = true }) {
                         Text(selectedVoiceLabel, color = White)
@@ -404,6 +410,33 @@ private fun MunchHome(activity: MainActivity) {
                             AssistantServices.setGroqFallbackEnabled(context, it)
                         })
                     }
+                    Text("Spotify agent connection", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(
+                        value = spotifyClientId,
+                        onValueChange = { spotifyClientId = it; SpotifyAgent.saveClientId(context, it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Spotify developer Client ID") },
+                        placeholder = { Text("Paste your app Client ID") },
+                        singleLine = true
+                    )
+                    Text("Register redirect URI exactly as: " + SpotifyAgent.REDIRECT_URI, color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text(spotifyStatus, color = if (SpotifyAgent.isConnected(context)) Cyan else Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    TextButton(onClick = {
+                        SpotifyAgent.saveClientId(context, spotifyClientId)
+                        spotifyStatus = if (spotifyClientId.isBlank()) "Add a Spotify developer Client ID first."
+                            else if (SpotifyAgent.connect(context)) "Finish sign-in in Spotify, then return to Munch."
+                            else "Could not open Spotify sign-in. Check the Client ID."
+                    }) { Text("Connect Spotify", color = Violet) }
+                    LaunchedEffect(activity.wakeIntentVersion, activity.spotifyAuthVersion) {
+                        spotifyStatus = SpotifyAgent.getStatus(context)
+                    }
+                    Text("Music app control", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("YouTube Music: optionally enable the Munch helper to select a visible result matching the song you asked for. Spotify: search through the Spotify app; playback transport commands use Android media controls. Full Spotify API queue/playback integration needs a registered Spotify developer app and user authorization.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        statusText = "In Accessibility settings, enable Munch YouTube Music helper only if you want automatic matching-result selection."
+                    }) { Text("Set up YouTube Music helper", color = Violet) }
+                    Text("The helper is optional, only observes YouTube Music windows, and clicks only a visible result matching your requested title. It may not work with every app layout.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Hands-free wake phrase", color = Cyan, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -537,31 +570,137 @@ private fun launchSpeech(
 private fun runAssistantRequest(
     context: android.content.Context,
     activity: MainActivity,
-    prompt: String,
+    rawPrompt: String,
     messages: MutableList<ChatLine>,
     setBusy: (Boolean) -> Unit,
     setStatus: (String) -> Unit,
     clearPrompt: () -> Unit
 ) {
+    val prompt = VoiceCommandParser.stripWakePhrase(rawPrompt)
     messages.add(ChatLine("user", prompt))
     AssistantServices.saveMessage(context, "user", prompt)
     clearPrompt()
     val lower = prompt.lowercase(Locale.ROOT)
     when {
+        Regex("^(?:please\\s+)?(?:next|skip)(?:\\s+(?:song|track|music))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "next") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+            val sent = AssistantServices.sendMediaCommand(context, "next")
+            val answer = if (sent) "Sent the next-track command to your active music player. If the track does not change, that app may not expose a controllable media session." else "I could not send the next-track command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+            }
+        }
+        Regex("^(?:previous|go back|last)(?:\\s+(?:song|track|music))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "previous") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+            val sent = AssistantServices.sendMediaCommand(context, "previous")
+            val answer = if (sent) "Sent the previous-track command to your active music player." else "I could not send the previous-track command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+            }
+        }
+        Regex("^(?:pause|pause music|stop music)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "pause") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+            val sent = AssistantServices.sendMediaCommand(context, "pause")
+            val answer = if (sent) "Sent the pause command to your active media player." else "I could not send the pause command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+            }
+        }
+        Regex("^(?:resume|resume music|continue music|continue playing)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "resume") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+            val sent = AssistantServices.sendMediaCommand(context, "resume")
+            val answer = if (sent) "Sent the play command to your active media player." else "I could not send the play command."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+            }
+        }
+        Regex("^(?:play\\s+pause|toggle playback|toggle music)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "toggle") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+            val sent = AssistantServices.sendMediaCommand(context, "toggle playback")
+            val answer = if (sent) "Sent the playback toggle command." else "I could not toggle playback."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+            }
+        }
         Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val match = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
             val requestedSong = match.groupValues.getOrElse(1) { "" }.trim().trimEnd('.', '!', '?')
             val genericSongRequest = requestedSong.lowercase(Locale.ROOT) in setOf("a song", "some music", "music", "a music", "song")
-            val opened = if (requestedSong.isNotBlank() && !genericSongRequest) AssistantServices.searchYouTube(context, requestedSong)
-                else AssistantServices.openExternalApp(context, "youtube")
-            val answer = when {
-                !opened -> "I couldn't open YouTube. Please check that YouTube is installed."
-                requestedSong.isNotBlank() && !genericSongRequest -> "Opening YouTube results for $requestedSong. Tap the matching result to play it."
-                requestedSong.isNotBlank() -> "Opening YouTube. Tell me the song title or artist and I'll search for it."
-                else -> "Opening YouTube."
+            if (requestedSong.isNotBlank() && !genericSongRequest) {
+                setBusy(true)
+                setStatus("Finding a playable YouTube result for $requestedSong…")
+                AssistantServices.playYouTubeSearch(context, requestedSong) { opened, autoPlay ->
+                    setBusy(false)
+                    val answer = when {
+                        !opened -> "I couldn't open YouTube. Please check that YouTube is installed."
+                        autoPlay -> "Opening a YouTube video for $requestedSong. Playback depends on YouTube."
+                        else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
+                    }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+                val opened = AssistantServices.openExternalApp(context, "youtube")
+                val answer = if (opened) "Opening YouTube." else "I couldn't open YouTube. Please check that YouTube is installed."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
             }
-            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
-            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^play\\s+(.+?)\\s+on\\s+youtube[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val match = Regex("^play\\s+(.+?)\\s+on\\s+youtube[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
+            val query = match.groupValues[1].trim()
+            setBusy(true)
+            setStatus("Finding a playable YouTube result for $query…")
+            AssistantServices.playYouTubeSearch(context, query) { opened, autoPlay ->
+                setBusy(false)
+                val answer = when {
+                    !opened -> "I couldn't open YouTube."
+                    autoPlay -> "Opening a YouTube video for $query. Playback depends on YouTube."
+                    else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
+                }
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            }
         }
         Regex("^play\\s+(youtube music|yt music|ytmusic)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val opened = AssistantServices.openMusicAndResume(context)
@@ -599,11 +738,37 @@ private fun runAssistantRequest(
                 setStatus(answer); activity.speak(answer)
             } else setStatus("Tell me the destination you want.")
         }
+        Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val query = Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE)
+                .matchEntire(prompt.trim())!!.groupValues[1].trim()
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                setStatus("Searching Spotify and starting playback for $query…")
+                SpotifyAgent.searchAndPlay(context, query) { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify couldn't start playback: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
+                val opened = AssistantServices.searchSpotify(context, query)
+                val answer = if (opened) "Opening Spotify search for $query. Connect Spotify in Settings to enable direct song selection and playback control."
+                    else "I couldn't open Spotify. Check that it is installed or that your browser can open Spotify."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            }
+        }
+        Regex("^(?:open|launch|start)\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val opened = AssistantServices.openSpotify(context)
+            val answer = if (opened) "Opening Spotify." else "I couldn't open Spotify."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
         Regex("^play\\s+(.+)$", RegexOption.IGNORE_CASE).matches(prompt.trim()) &&
             !lower.matches(Regex("^play\\s+(music|my music|some music|the music)[.! ]*$")) -> {
             val query = prompt.trim().replaceFirst(Regex("^play\\s+", RegexOption.IGNORE_CASE), "").trim().trimEnd('.', '!')
             val opened = AssistantServices.searchMusic(context, query)
-            val answer = if (opened) "Searching your music for $query." else "I couldn't open a music search for $query."
+            val answer = if (opened) "Opening YouTube Music search for $query. Choose a track to start it; I can send next, previous, pause, and resume commands while a player is active." else "I could not open a music search for $query."
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
         }

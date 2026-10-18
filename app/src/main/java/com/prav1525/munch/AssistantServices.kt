@@ -25,6 +25,12 @@ import java.util.concurrent.Executors
  */
 object AssistantServices {
     private val io = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun deliverResult(callback: (Result<String>) -> Unit, result: Result<String>) {
+        if (Looper.myLooper() == Looper.getMainLooper()) callback(result)
+        else mainHandler.post { callback(result) }
+    }
     private const val PREFS = "munch_preferences"
     private const val HISTORY = "conversation_history"
     private const val API_KEY = "gemini_api_key"
@@ -87,7 +93,7 @@ object AssistantServices {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val key = prefs.getString(GROQ_API_KEY, "").orEmpty()
         if (!prefs.getBoolean(GROQ_FALLBACK_ENABLED, true) || key.isBlank()) {
-            callback(Result.failure(IllegalStateException("Online fallback is disabled or no Groq API key is configured.")))
+            deliverResult(callback, Result.failure(IllegalStateException("Online fallback is disabled or no Groq API key is configured.")))
             return
         }
         io.execute {
@@ -152,7 +158,7 @@ object AssistantServices {
         val key = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(API_KEY, "").orEmpty()
         if (key.isBlank()) {
-            callback(Result.failure(IllegalStateException("Add your Gemini API key in Settings to enable AI answers.")))
+            deliverResult(callback, Result.failure(IllegalStateException("Add your Gemini API key in Settings to enable AI answers.")))
             return
         }
         io.execute {
@@ -206,10 +212,10 @@ object AssistantServices {
                     throw IllegalStateException(lastError)
                 }
 
-                if (!answer.isNullOrBlank()) callback(Result.success(answer!!))
+                if (!answer.isNullOrBlank()) deliverResult(callback, Result.success(answer!!))
                 else throw IllegalStateException(lastError ?: "No supported Gemini model was available. Check your API key and project access.")
             } catch (e: Exception) {
-                callback(Result.failure(e))
+                deliverResult(callback, Result.failure(e))
             }
         }
     }
@@ -422,7 +428,103 @@ object AssistantServices {
         }.getOrDefault(false)
     }
 
-    /** Opens YouTube search results for a spoken title; Android/YouTube may require a tap to start playback. */
+    /**
+     * Resolve a real YouTube video from search results and open the watch URL directly.
+     * YouTube can change its HTML or require user interaction; failures fall back to search.
+     */
+    fun playYouTubeSearch(context: Context, query: String, callback: (opened: Boolean, autoPlayRequested: Boolean) -> Unit) {
+        val clean = query.trim()
+        if (clean.isBlank()) {
+            callback(openExternalApp(context, "youtube"), false)
+            return
+        }
+
+        val searchText = when {
+            clean.matches(Regex("(?i).+\\s+movie\\s+songs?")) -> clean
+            clean.matches(Regex("(?i).+\\s+songs?")) ->
+                clean.replace(Regex("(?i)\\s+songs?$"), "").trim() + " Tamil movie songs full album"
+            else -> clean
+        }
+
+        io.execute {
+            // YouTube serves different markup (and sometimes different failures) from its
+            // desktop and mobile search endpoints. Try both before falling back to a results
+            // page, and prefer a videoRenderer ID over an arbitrary embedded video ID.
+            val videoId = runCatching {
+                val encodedQuery = Uri.encode(searchText)
+                val endpoints = listOf(
+                    "https://www.youtube.com/results?search_query=" + encodedQuery,
+                    "https://m.youtube.com/results?search_query=" + encodedQuery
+                )
+                for (endpoint in endpoints) {
+                    val resolved = runCatching {
+                        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 3_000
+                            readTimeout = 4_000
+                            instanceFollowRedirects = true
+                            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36")
+                            setRequestProperty("Accept-Language", "en-IN,en;q=0.9,ta;q=0.8")
+                            setRequestProperty("Accept", "text/html,application/xhtml+xml")
+                        }
+                        try {
+                            if (connection.responseCode !in 200..299) null
+                            else {
+                                // Bound memory use: search pages can be several MB on mobile.
+                                val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                                    val out = StringBuilder()
+                                    val buffer = CharArray(8192)
+                                    var total = 0
+                                    while (total < 2_000_000) {
+                                        val count = reader.read(buffer, 0, minOf(buffer.size, 2_000_000 - total))
+                                        if (count < 0) break
+                                        out.append(buffer, 0, count)
+                                        total += count
+                                    }
+                                    out.toString()
+                                }
+                                val rendererId = Regex(
+                                    """"videoRenderer"\s*:\s*\{[\s\S]{0,16000}?"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
+                                ).find(html)?.groupValues?.getOrNull(1)
+                                rendererId ?: Regex(
+                                    """"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
+                                ).find(html)?.groupValues?.getOrNull(1)
+                            }
+                        } finally {
+                            connection.disconnect()
+                        }
+                    }.getOrNull()
+                    if (!resolved.isNullOrBlank()) return@runCatching resolved
+                }
+                null
+            }.getOrNull()
+
+            Handler(Looper.getMainLooper()).post {
+                val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                val intents = if (!videoId.isNullOrBlank()) {
+                    listOf(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId"))
+                            .setPackage("com.google.android.youtube").addFlags(flags),
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
+                            .setPackage("com.google.android.youtube").addFlags(flags),
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
+                            .addFlags(flags)
+                    )
+                } else {
+                    val searchUri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(searchText))
+                    listOf(
+                        Intent(Intent.ACTION_VIEW, searchUri).setPackage("com.google.android.youtube").addFlags(flags),
+                        Intent(Intent.ACTION_VIEW, searchUri).addFlags(flags)
+                    )
+                }
+                val opened = intents.any { intent ->
+                    runCatching { context.startActivity(intent); true }.getOrDefault(false)
+                }
+                callback(opened, opened && !videoId.isNullOrBlank())
+            }
+        }
+    }
+
     fun searchYouTube(context: Context, query: String): Boolean {
         val clean = query.trim()
         if (clean.isBlank()) return openExternalApp(context, "youtube")
@@ -436,11 +538,61 @@ object AssistantServices {
         }.getOrDefault(false)
     }
 
+    /** Opens Spotify directly when installed; search uses Spotify's supported app URI. */
+    fun openSpotify(context: Context): Boolean {
+        val launch = context.packageManager.getLaunchIntentForPackage("com.spotify.music")
+        if (launch != null) return runCatching {
+            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+        }.getOrDefault(false)
+        return runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://open.spotify.com"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+        }.getOrDefault(false)
+    }
+
+    /** Searches in Spotify. Actual playback depends on Spotify account/app state. */
+    fun searchSpotify(context: Context, query: String): Boolean {
+        val clean = query.trim()
+        if (clean.isBlank()) return openSpotify(context)
+        val deepLink = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(clean)))
+            .setPackage("com.spotify.music")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(deepLink); true }.getOrDefault(false)) return true
+        val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://open.spotify.com/search/" + Uri.encode(clean)))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(web); true }.getOrDefault(false)
+    }
+
+    /**
+     * Sends a transport command to Android's currently active media session.
+     * This works with players that publish a media session; Android does not expose
+     * a universal way to verify that a third-party app actually changed playback.
+     */
+    fun sendMediaCommand(context: Context, command: String): Boolean {
+        val keyCode = when (command.trim().lowercase(Locale.ROOT)) {
+            "next", "next song", "skip", "skip song" -> KeyEvent.KEYCODE_MEDIA_NEXT
+            "previous", "previous song", "back", "last song" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            "pause", "pause music", "stop music" -> KeyEvent.KEYCODE_MEDIA_PAUSE
+            "play", "resume", "resume music", "continue music" -> KeyEvent.KEYCODE_MEDIA_PLAY
+            "play pause", "toggle playback", "toggle music" -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            else -> return false
+        }
+        return runCatching {
+            val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+            audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+            true
+        }.getOrDefault(false)
+    }
+
     /** Opens a search for the requested track/artist in a music app or browser. Playback depends on that app. */
     fun searchMusic(context: Context, query: String): Boolean {
         val clean = query.trim()
         if (clean.isBlank()) return runCatching { openMusic(context); true }.getOrDefault(false)
         val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        if (MusicAppAssistService.isEnabled(context)) {
+            return MusicAppAssistService.requestSearch(context, clean)
+        }
         val uri = Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(clean))
         val appIntent = Intent(Intent.ACTION_VIEW, uri)
             .setPackage("com.google.android.apps.youtube.music")

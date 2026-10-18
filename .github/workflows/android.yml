@@ -21,7 +21,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
       - name: Compile, test, and assemble debug APK
         run: gradle --no-daemon testDebugUnitTest assembleDebug
       - name: Upload debug APK
