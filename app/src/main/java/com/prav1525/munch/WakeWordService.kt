@@ -94,7 +94,7 @@ class WakeWordService : Service() {
     }
 
     private fun startRecognition() {
-        if (listening || dedicatedDetectorActive || handlingWake ||
+        if (listening || dedicatedDetectorActive || handlingWake || awaitingCommand ||
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
 
@@ -123,22 +123,18 @@ class WakeWordService : Service() {
                 else "Offline “Hey Jarvis” detector active (temporary model)"
             )
             detector.start { score ->
-                if (score >= WAKE_THRESHOLD && dedicatedDetectorActive && !handlingWake) {
-                    handleDedicatedWake()
+                // The detector callback may run on its audio thread. Serialize state changes
+                // and SpeechRecognizer handoff on the main thread, and guard duplicate triggers.
+                if (score >= WAKE_THRESHOLD) {
+                    mainHandler.post {
+                        if (dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
+                            handleDedicatedWake()
+                        }
+                    }
                 }
             }
-            // Avoid silently waiting forever if the detector's audio pipeline is unsupported.
-            mainHandler.postDelayed({
-                if (dedicatedDetectorActive && !handlingWake) {
-                    dedicatedDetectorActive = false
-                    forceSpeechFallback = true
-                    runCatching { wakeDetector?.stop() }
-                    runCatching { wakeDetector?.release() }
-                    wakeDetector = null
-                    updateNotification("Using speech fallback — say Hey Jarvis")
-                    startSpeechRecognition()
-                }
-            }, DETECTOR_FALLBACK_DELAY_MS)
+            // Do not time out a healthy detector just because no wake phrase was spoken.
+            // Fall back only when initialization/start actually throws, which is handled below.
             return
         } catch (_: Exception) {
             dedicatedDetectorActive = false
@@ -250,7 +246,8 @@ class WakeWordService : Service() {
             val phrases = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
             if (awaitingCommand) {
                 awaitingCommand = false
-                val command = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+                val recognized = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+                val command = VoiceCommandParser.stripWakePhrase(recognized)
                 if (command.isNotBlank()) {
                     val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -414,8 +411,7 @@ class WakeWordService : Service() {
         private const val CHANNEL_ID = "munch_wake_listener"
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
-        private const val DETECTOR_FALLBACK_DELAY_MS = 20_000L
-        private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
+                private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
         private const val WAKE_THRESHOLD = 0.55f
     }
