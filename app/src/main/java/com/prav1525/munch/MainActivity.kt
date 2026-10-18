@@ -537,12 +537,13 @@ private fun launchSpeech(
 private fun runAssistantRequest(
     context: android.content.Context,
     activity: MainActivity,
-    prompt: String,
+    rawPrompt: String,
     messages: MutableList<ChatLine>,
     setBusy: (Boolean) -> Unit,
     setStatus: (String) -> Unit,
     clearPrompt: () -> Unit
 ) {
+    val prompt = VoiceCommandParser.stripWakePhrase(rawPrompt)
     messages.add(ChatLine("user", prompt))
     AssistantServices.saveMessage(context, "user", prompt)
     clearPrompt()
