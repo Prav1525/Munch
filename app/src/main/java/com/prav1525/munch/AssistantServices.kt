@@ -538,6 +538,31 @@ object AssistantServices {
         }.getOrDefault(false)
     }
 
+    /** Opens Spotify directly when installed; search uses Spotify's supported app URI. */
+    fun openSpotify(context: Context): Boolean {
+        val launch = context.packageManager.getLaunchIntentForPackage("com.spotify.music")
+        if (launch != null) return runCatching {
+            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+        }.getOrDefault(false)
+        return runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://open.spotify.com"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+        }.getOrDefault(false)
+    }
+
+    /** Searches in Spotify. Actual playback depends on Spotify account/app state. */
+    fun searchSpotify(context: Context, query: String): Boolean {
+        val clean = query.trim()
+        if (clean.isBlank()) return openSpotify(context)
+        val deepLink = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(clean)))
+            .setPackage("com.spotify.music")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(deepLink); true }.getOrDefault(false)) return true
+        val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://open.spotify.com/search/" + Uri.encode(clean)))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(web); true }.getOrDefault(false)
+    }
+
     /**
      * Sends a transport command to Android's currently active media session.
      * This works with players that publish a media session; Android does not expose
@@ -565,6 +590,9 @@ object AssistantServices {
         val clean = query.trim()
         if (clean.isBlank()) return runCatching { openMusic(context); true }.getOrDefault(false)
         val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        if (MusicAppAssistService.isEnabled(context)) {
+            return MusicAppAssistService.requestSearch(context, clean)
+        }
         val uri = Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(clean))
         val appIntent = Intent(Intent.ACTION_VIEW, uri)
             .setPackage("com.google.android.apps.youtube.music")
