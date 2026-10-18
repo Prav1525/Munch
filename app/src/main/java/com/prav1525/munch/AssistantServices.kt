@@ -342,6 +342,8 @@ object AssistantServices {
             .lowercase(Locale.ROOT)
             .removeSuffix(" application")
             .removeSuffix(" app")
+            .removePrefix("the ")
+            .removePrefix("my ")
             .trim()
         if (requested.isBlank()) return false
 
