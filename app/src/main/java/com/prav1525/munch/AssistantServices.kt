@@ -246,19 +246,28 @@ object AssistantServices {
     }
 
     fun openMusic(context: Context) {
-        val intent = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        runCatching { context.startActivity(intent) }
-            .onFailure {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
+        val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        val packageName = "com.google.android.apps.youtube.music"
+        val appLaunch = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (appLaunch != null && runCatching {
+                context.startActivity(appLaunch.addFlags(flags)); true
+            }.getOrDefault(false)) return
+        if (runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com")).addFlags(flags))
+                true
+            }.getOrDefault(false)) return
+        runCatching {
+            context.startActivity(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC).addFlags(flags))
+        }
     }
 
     /** Open common installed apps through Android intents. This launches apps; it does not grant
      * unrestricted control over them. Sensitive actions remain in the target app for confirmation. */
     fun openExternalApp(context: Context, app: String): Boolean {
-        val normalized = app.trim().lowercase()
+        val normalized = app.trim().lowercase(Locale.ROOT)
+        if (normalized in setOf("youtube music", "youtube music app", "yt music", "ytmusic")) {
+            return openMusicApp(context)
+        }
         val intent = when (normalized) {
             "whatsapp" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/"))
             "youtube" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com"))
@@ -291,10 +300,28 @@ object AssistantServices {
         }
     }
 
+    private fun openMusicApp(context: Context): Boolean {
+        val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        val launch = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.youtube.music")
+        if (launch != null && runCatching {
+                context.startActivity(launch.addFlags(flags)); true
+            }.getOrDefault(false)) return true
+        return runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com")).addFlags(flags))
+            true
+        }.getOrElse {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com")).addFlags(flags))
+                true
+            }.getOrDefault(false)
+        }
+    }
+
     /** Launches an installed launcher activity by its visible app label, e.g. "Spotify". */
     fun openInstalledApp(context: Context, requestedName: String): Boolean {
         var requested = requestedName.trim().lowercase(Locale.ROOT)
         requested = requested.removeSuffix(" application").removeSuffix(" app").trim()
+        if (requested in setOf("youtube music", "yt music", "ytmusic")) return openMusicApp(context)
         if (requested == "navigation" || requested == "maps") requested = "google maps"
         if (requested.isBlank()) return false
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -316,16 +343,19 @@ object AssistantServices {
     fun searchMusic(context: Context, query: String): Boolean {
         val clean = query.trim()
         if (clean.isBlank()) return runCatching { openMusic(context); true }.getOrDefault(false)
+        val flags = Intent.FLAG_ACTIVITY_NEW_TASK
         val uri = Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(clean))
-        val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val appIntent = Intent(Intent.ACTION_VIEW, uri)
+            .setPackage("com.google.android.apps.youtube.music")
+            .addFlags(flags)
+        if (runCatching { context.startActivity(appIntent); true }.getOrDefault(false)) return true
         return runCatching {
-            context.startActivity(intent)
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(flags))
             true
         }.getOrElse {
             runCatching {
                 context.startActivity(Intent(Intent.ACTION_VIEW,
-                    Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(clean)))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(clean))).addFlags(flags))
                 true
             }.getOrDefault(false)
         }
