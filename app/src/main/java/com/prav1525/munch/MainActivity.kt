@@ -634,7 +634,7 @@ private fun runAssistantRequest(
                 setBusy(false)
                 val answer = when {
                     !opened -> "I couldn't open YouTube. Please check your connection."
-                    autoPlay -> "Playing $query on YouTube."
+                    autoPlay -> "Opening a YouTube video for $query. Playback depends on YouTube."
                     else -> "I opened YouTube, but automatic playback couldn't be confirmed. Check your connection and try again."
                 }
                 messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
