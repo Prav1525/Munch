@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
 object LocalModelManager {
     const val MODEL_NAME = "Qwen3 1.7B (Q4_K_M) — faster replies"
     private const val MODEL_FILE = "qwen3-1.7b-q4_k_m.gguf"
-    private const val MODEL_URL = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true"
+    private const val MODEL_URL = "https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true"
     private const val MIN_FREE_BYTES = 2_000_000_000L
     private val executor = Executors.newSingleThreadExecutor()
 
