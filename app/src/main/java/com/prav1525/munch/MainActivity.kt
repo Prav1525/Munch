@@ -163,13 +163,30 @@ private fun MunchHome(activity: MainActivity) {
             } else statusText = "I didn't catch that. Try again."
         } else statusText = "Voice input was cancelled or unavailable."
     }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (pendingWakeEnable) {
+            pendingWakeEnable = false
+            context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit()
+                .putBoolean("wake_word_enabled", true).apply()
+            wakeEnabled = true
+            ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+            statusText = if (granted) "Hey Munch listening is on. Keep its notification visible."
+                else "Wake listening started, but notifications are blocked. Allow Munch notifications to see listener status."
+        }
+    }
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted && pendingWakeEnable) {
-            pendingWakeEnable = false
-            context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit().putBoolean("wake_word_enabled", true).apply()
-            wakeEnabled = true
-            androidx.core.content.ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
-            statusText = "Hey Munch listening is on. Keep the persistent notification visible."
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                pendingWakeEnable = false
+                context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit()
+                    .putBoolean("wake_word_enabled", true).apply()
+                wakeEnabled = true
+                ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+                statusText = "Hey Munch listening is on. Keep its notification visible."
+            }
         } else if (granted) launchSpeech(speechLauncher) { statusText = it }
         else {
             pendingWakeEnable = false
@@ -354,11 +371,16 @@ private fun MunchHome(activity: MainActivity) {
                             if (enabled) {
                                 pendingWakeEnable = true
                                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                    pendingWakeEnable = false
-                                    context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit().putBoolean("wake_word_enabled", true).apply()
-                                    wakeEnabled = true
-                                    ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
-                                    statusText = "Hey Munch listening is on."
+                                    if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    } else {
+                                        pendingWakeEnable = false
+                                        context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit().putBoolean("wake_word_enabled", true).apply()
+                                        wakeEnabled = true
+                                        ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+                                        statusText = "Hey Munch listening is on. Keep its notification visible."
+                                    }
                                 } else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
                             } else {
                                 pendingWakeEnable = false
