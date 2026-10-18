@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <thread>
 #include "llama.h"
 
 namespace {
@@ -41,8 +42,8 @@ Java_com_prav1525_munch_LocalLlmNative_loadModel(JNIEnv *env, jobject, jstring p
     // Keep inference memory and latency more manageable on 8 GB Android devices.
     context_params.n_ctx = 1024;
     context_params.n_batch = 128;
-    context_params.n_threads = 4;
-    context_params.n_threads_batch = 4;
+    context_params.n_threads = std::max(2, std::min(6, (int)std::thread::hardware_concurrency()));
+    context_params.n_threads_batch = context_params.n_threads;
     g_context = llama_init_from_model(g_model, context_params);
     if (!g_context) { release_locked(); return JNI_FALSE; }
     g_sampler = llama_sampler_init_greedy();
