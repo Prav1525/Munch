@@ -14,15 +14,15 @@ import java.util.concurrent.Executors
  * resumed where HTTP Range is supported. A partial wake lock keeps the CPU awake.
  */
 object LocalModelManager {
-    const val MODEL_NAME = "Qwen3 4B (Q4_K_M)"
-    private const val MODEL_FILE = "qwen3-4b-q4_k_m.gguf"
-    private const val MODEL_URL = "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true"
-    private const val MIN_FREE_BYTES = 3_500_000_000L
+    const val MODEL_NAME = "Qwen3 1.7B (Q4_K_M) — faster replies"
+    private const val MODEL_FILE = "qwen3-1.7b-q4_k_m.gguf"
+    private const val MODEL_URL = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true"
+    private const val MIN_FREE_BYTES = 2_000_000_000L
     private val executor = Executors.newSingleThreadExecutor()
 
     fun modelFile(context: Context): File = File(context.filesDir, MODEL_FILE)
     fun isDownloaded(context: Context): Boolean =
-        modelFile(context).let { it.exists() && it.length() > 1_000_000_000L }
+        modelFile(context).let { it.exists() && it.length() > 700_000_000L }
 
     /** Copies a user-selected GGUF into app-private storage so it remains available after restart. */
     fun importModel(context: Context, uri: Uri, onProgress: (String) -> Unit, onComplete: (Result<File>) -> Unit) {
@@ -49,7 +49,7 @@ object LocalModelManager {
                     }
                 }
                 require(temporary.length() > 1_000_000_000L) {
-                    "That file is too small to be a complete GGUF model. Choose a large .gguf file."
+                    "That file is too small to be a complete Qwen3 1.7B GGUF model. Choose the Q4_K_M .gguf file."
                 }
                 if (target.exists() && !target.delete()) throw IllegalStateException("Could not replace the existing model.")
                 if (!temporary.renameTo(target)) throw IllegalStateException("Could not save the imported model.")
@@ -73,7 +73,7 @@ object LocalModelManager {
                     return@execute
                 }
                 if (context.filesDir.usableSpace < MIN_FREE_BYTES) {
-                    throw IllegalStateException("Free at least 3.5 GB of app storage before downloading the model.")
+                    throw IllegalStateException("Free at least 2 GB of app storage before downloading the model.")
                 }
                 wakeLock.acquire()
                 onProgress("Connecting to Hugging Face…")
@@ -121,8 +121,8 @@ object LocalModelManager {
                                 val percent = if (expectedTotal > 0) (received * 100 / expectedTotal).toInt() else -1
                                 if (percent != lastReported) {
                                     lastReported = percent
-                                    if (percent >= 0) onProgress("Downloading Qwen3: " + percent + "% (" + received / (1024 * 1024) + " MB)")
-                                    else onProgress("Downloading Qwen3: " + received / (1024 * 1024) + " MB")
+                                    if (percent >= 0) onProgress("Downloading Qwen3 1.7B: " + percent + "% (" + received / (1024 * 1024) + " MB)")
+                                    else onProgress("Downloading Qwen3 1.7B: " + received / (1024 * 1024) + " MB")
                                 }
                             }
                             output.fd.sync()
@@ -131,7 +131,7 @@ object LocalModelManager {
                 } finally {
                     connection.disconnect()
                 }
-                if (partial.length() < 1_000_000_000L) {
+                if (partial.length() < 700_000_000L) {
                     throw IllegalStateException("Download is incomplete (" + partial.length() / (1024 * 1024) + " MB). Retry to resume it.")
                 }
                 if (target.exists()) target.delete()
