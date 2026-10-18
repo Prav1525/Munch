@@ -69,10 +69,14 @@ object LocalLlmService {
             val answer = if (loaded) runCatching {
                 // Qwen3 Instruct expects ChatML markers; plain "User:/Assistant:" text
                 // bypasses its instruction formatting and can lead to poor/repetitive replies.
-                val safePrompt = prompt.trim().take(1200)
-                val chatPrompt = "<|im_start|>system\nYou are Munch, a concise and friendly Android voice assistant. Answer directly in one short sentence unless more detail is necessary. Do not claim to perform phone actions; Munch handles navigation, music, and reminders separately. /no_think<|im_end|>\n" +
-                    "<|im_start|>user\n" + safePrompt + "<|im_end|>\n<|im_start|>assistant\n"
-                LocalLlmNative.generate(chatPrompt, 40).trim().takeIf { it.isNotBlank() }
+                val safePrompt = prompt.trim().take(700)
+                val chatPrompt = "<|im_start|>system\nYou are Munch, a concise and friendly Android voice assistant. Answer directly in one short sentence unless more detail is necessary. Never show private reasoning, analysis, or hidden thinking. Do not claim to perform phone actions; Munch handles navigation, music, and reminders separately.<|im_end|>\n" +
+                    "<|im_start|>user\n" + safePrompt + "<|im_end|>\n<|im_start|>assistant\n/no_think\n"
+                LocalLlmNative.generate(chatPrompt, 24).trim()
+                    .replace(Regex("(?s)<think>.*?(?:</think>|$)"), "")
+                    .replace(Regex("<\\|(?:im_start|im_end|endoftext|fim_suffix|fim_prefix|fim_middle|ghissue|meta_sep|meta_start)[^>]*>"), "")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
             }.getOrNull() else null
             main.post { callback(answer.orEmpty()) }
         }
