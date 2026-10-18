@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.media.AudioManager
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
@@ -123,7 +124,9 @@ class WakeWordService : Service() {
                 else "Offline “Hey Jarvis” detector active (temporary model)"
             )
             detector.start { score ->
-                if (score >= WAKE_THRESHOLD && dedicatedDetectorActive && !handlingWake) {
+                // Make accidental wake-ups less likely while music is playing.
+                val threshold = if (isMediaActive()) MEDIA_PLAYING_WAKE_THRESHOLD else WAKE_THRESHOLD
+                if (score >= threshold && dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
                     handleDedicatedWake()
                 }
             }
@@ -252,12 +255,7 @@ class WakeWordService : Service() {
                 awaitingCommand = false
                 val command = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
                 if (command.isNotBlank()) {
-                    val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        putExtra("munch_wake_command", command)
-                    }
-                    updateNotification("Command heard — tap to run", command)
-                    runCatching { startActivity(launch) }
+                    dispatchCapturedCommand(command)
                 } else {
                     updateNotification("No command heard — listening again")
                 }
@@ -338,6 +336,43 @@ class WakeWordService : Service() {
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
         // Cancellation can suppress the normal onResults callback, so schedule recovery here too.
         mainHandler.postDelayed({ startRecognition() }, 12_000)
+    }
+
+    private fun isMediaActive(): Boolean =
+        runCatching { (getSystemService(AUDIO_SERVICE) as AudioManager).isMusicActive }.getOrDefault(false)
+
+    /**
+     * Run common play requests in the foreground service. This avoids depending on Android
+     * allowing an Activity launch from the background immediately after wake detection.
+     */
+    private fun dispatchCapturedCommand(rawCommand: String) {
+        val command = rawCommand.trim().trimEnd('.', '!', '?')
+        val play = Regex("^(?:please\\s+)?play\\s+(.+?)(?:\\s+on\\s+youtube)?$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (play != null && play.groupValues[1].isNotBlank()) {
+            val query = play.groupValues[1].trim()
+            updateNotification("Finding YouTube playback for $query…")
+            AssistantServices.playYouTubeSearch(this, query) { opened, autoPlay ->
+                updateNotification(
+                    when {
+                        !opened -> "Couldn't open YouTube for $query"
+                        autoPlay -> "Opened video for $query"
+                        else -> "YouTube opened; automatic playback not confirmed"
+                    }
+                )
+                awaitingCommand = false
+                handlingWake = false
+                mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+            }
+            return
+        }
+        val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("munch_wake_command", command)
+        }
+        updateNotification("Command heard — opening Munch", command)
+        val opened = runCatching { startActivity(launch); true }.getOrDefault(false)
+        if (!opened) updateNotification("Command heard — tap notification to run", command)
     }
 
     private fun createNotificationChannel() {
