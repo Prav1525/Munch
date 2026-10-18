@@ -10,7 +10,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.util.concurrent.Executors
 
 /**
@@ -41,14 +40,16 @@ object AssistantServices {
         }
         io.execute {
             try {
-                val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
-                    URLEncoder.encode(key, "UTF-8"))
+                // Use a currently recommended model for new projects. Gemini 2.5 access
+                // has been limited for some new projects, which can surface as HTTP 404.
+                val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent")
                 val connection = (endpoint.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 15000
                     readTimeout = 30000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("x-goog-api-key", key)
                 }
                 val body = JSONObject()
                     .put("contents", JSONArray().put(JSONObject().put("parts",
@@ -59,7 +60,18 @@ object AssistantServices {
                 val stream = if (code in 200..299) connection.inputStream else connection.errorStream
                 val raw = stream.bufferedReader().use { it.readText() }
                 connection.disconnect()
-                if (code !in 200..299) throw IllegalStateException("AI request failed (HTTP $code). Check the API key and connection.")
+                if (code !in 200..299) {
+                    val detail = runCatching {
+                        JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty()
+                    }.getOrDefault("")
+                    val safeDetail = detail.take(240)
+                    val message = if (safeDetail.isNotBlank()) {
+                        "Gemini API error (HTTP $code): $safeDetail"
+                    } else {
+                        "Gemini API error (HTTP $code). Check the model access and API key in Google AI Studio."
+                    }
+                    throw IllegalStateException(message)
+                }
                 val json = JSONObject(raw)
                 val answer = json.optJSONArray("candidates")?.optJSONObject(0)
                     ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
