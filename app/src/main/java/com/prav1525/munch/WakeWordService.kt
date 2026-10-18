@@ -259,12 +259,14 @@ class WakeWordService : Service() {
                 val recognized = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
                 val command = VoiceCommandParser.stripWakePhrase(recognized)
                 if (command.isNotBlank()) {
-                    val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        putExtra("munch_wake_command", command)
+                    if (!handleMediaCommandInService(command)) {
+                        val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                            putExtra("munch_wake_command", command)
+                        }
+                        updateNotification("Command heard — tap to run", command)
+                        runCatching { startActivity(launch) }
                     }
-                    updateNotification("Command heard — tap to run", command)
-                    runCatching { startActivity(launch) }
                 } else {
                     updateNotification("No command heard — listening again")
                 }
@@ -330,12 +332,50 @@ class WakeWordService : Service() {
         }, COMMAND_CAPTURE_TIMEOUT_MS)
     }
 
+    /**
+     * Execute media transport commands in the foreground service. This deliberately avoids
+     * launching MainActivity over the current player for next/pause/resume follow-ups.
+     */
+    private fun handleMediaCommandInService(rawCommand: String): Boolean {
+        val command = VoiceCommandParser.stripWakePhrase(rawCommand)
+            .lowercase(java.util.Locale.ROOT)
+            .trim()
+            .trimEnd('.', '!', '?')
+        val normalized = when {
+            Regex("^(?:please\\s+)?(?:next|skip)(?:\\s+(?:song|track|music))?$").matches(command) -> "next"
+            Regex("^(?:please\\s+)?(?:previous|go back|last)(?:\\s+(?:song|track|music))?$").matches(command) -> "previous"
+            command in setOf("pause", "pause music", "stop music") -> "pause"
+            command in setOf("resume", "resume music", "continue music", "continue playing") -> "resume"
+            command in setOf("play pause", "toggle playback", "toggle music") -> "toggle playback"
+            else -> return false
+        }
+        val sent = AssistantServices.sendMediaCommand(this, normalized)
+        val message = when {
+            !sent -> "Could not send $normalized command to the media player"
+            normalized == "next" -> "Next-track command sent"
+            normalized == "previous" -> "Previous-track command sent"
+            normalized == "pause" -> "Pause command sent"
+            normalized == "resume" -> "Play command sent"
+            else -> "Playback toggle command sent"
+        }
+        updateNotification(message, rawCommand)
+        AssistantServices.saveMessage(this, "assistant", message)
+        return true
+    }
+
     private fun handlePhrase(phrase: String) {
         val match = Regex(".*?\\bhey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
             ?: return
         if (handlingWake) return
         handlingWake = true
         val command = match.groupValues.getOrElse(1) { "" }.trim().trim(',', '.', '!', '?')
+        // Media transport commands are handled inside the foreground service so the
+        // music app stays foreground instead of being covered by Munch's activity.
+        if (command.isNotBlank() && handleMediaCommandInService(command)) {
+            handlingWake = false
+            mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+            return
+        }
         val launch = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             if (command.isNotBlank()) putExtra("munch_wake_command", command)
