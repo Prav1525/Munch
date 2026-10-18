@@ -19,6 +19,13 @@ class VoiceCommandParserTest {
     }
 
     @Test
+    fun recognizesMusicAppCommandsWithoutTreatingThemAsTrackSearches() {
+        assertEquals(true, VoiceCommandParser.isMusicAppCommand("play YouTube Music"))
+        assertEquals(true, VoiceCommandParser.isMusicAppCommand("Hey Jarvis, resume music"))
+        assertNull(VoiceCommandParser.youtubePlayQuery("play YouTube Music"))
+    }
+
+    @Test
     fun rejectsBlankOrNonPlayCommands() {
         assertNull(VoiceCommandParser.youtubePlayQuery(""))
         assertNull(VoiceCommandParser.youtubePlayQuery("open settings"))
