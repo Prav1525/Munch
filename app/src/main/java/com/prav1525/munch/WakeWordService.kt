@@ -380,16 +380,25 @@ class WakeWordService : Service() {
         val command = match.groupValues.getOrElse(1) { "" }.trim().trim(',', '.', '!', '?')
         if (command.isNotBlank()) {
             dispatchCapturedCommand(command)
+            mainHandler.postDelayed({ handlingWake = false }, 10_000)
+            mainHandler.postDelayed({ startRecognition() }, 12_000)
         } else {
-            val launch = Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                putExtra("munch_wake_listen", true)
-            }
-            updateNotification("Wake phrase heard — say your command", listen = true)
-            runCatching { startActivity(launch) }
+            // Keep the two-stage fallback in the service too; don't depend on a background
+            // Activity launch to begin command capture.
+            handlingWake = false
+            awaitingCommand = true
+            updateNotification("Wake phrase heard — preparing command capture")
+            acknowledgeAndCaptureCommand()
+            mainHandler.postDelayed({
+                if (awaitingCommand) {
+                    awaitingCommand = false
+                    runCatching { recognizer?.cancel() }
+                    listening = false
+                    updateNotification("No command heard — listening again")
+                    startRecognition()
+                }
+            }, COMMAND_CAPTURE_TIMEOUT_MS)
         }
-        mainHandler.postDelayed({ handlingWake = false }, 10_000)
-        mainHandler.postDelayed({ startRecognition() }, 12_000)
     }
 
     private fun isMediaActive(): Boolean =
