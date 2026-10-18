@@ -58,7 +58,7 @@ object AssistantServices {
                     }
                     val body = JSONObject()
                         .put("contents", JSONArray().put(JSONObject().put("parts",
-                            JSONArray().put(JSONObject().put("text", prompt)))))
+                            JSONArray().put(JSONObject().put("text", "You are Munch, a helpful personal assistant. Reply naturally and concisely, usually in one short sentence. Give more detail only when the question needs it or the user asks for an explanation. Avoid filler, repeated confirmations, long introductions, and unnecessary lists. For simple requests, answer directly. Keep safety-critical information complete.\n\nUser: " + prompt)))))
                         .toString()
                     connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                     val code = connection.responseCode
