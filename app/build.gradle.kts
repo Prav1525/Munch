@@ -1,5 +1,3 @@
-import java.net.URL
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -31,10 +29,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
     buildFeatures {
@@ -44,31 +40,6 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
-}
-
-val downloadHeyJarvisWakeModel = tasks.register("downloadHeyJarvisWakeModel") {
-    val modelFile = layout.buildDirectory.file("generated/wakeword-assets/hey_jarvis_v0.1.onnx")
-    outputs.file(modelFile)
-    doLast {
-        val destination = modelFile.get().asFile
-        if (!destination.exists()) {
-            destination.parentFile.mkdirs()
-            URL("https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx")
-                .openStream().use { input ->
-                    destination.outputStream().use { output -> input.copyTo(output) }
-                }
-        }
-        check(destination.length() > 100_000L) {
-            "Hey Jarvis ONNX model download is missing or incomplete: $destination"
-        }
-    }
-}
-
-android.sourceSets.getByName("main").assets.srcDir(
-    layout.buildDirectory.dir("generated/wakeword-assets")
-)
-tasks.named("preBuild").configure {
-    dependsOn(downloadHeyJarvisWakeModel)
 }
 
 dependencies {
@@ -83,8 +54,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.media:media:1.7.0")
-    // Use the coordinate documented by AndroidWakeWord for its v0.0.1 release.
-    implementation("com.github.suxsem:AndroidWakeWord:v0.0.1")
+    implementation("com.github.msnilsen:openwakeword-android:0.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
