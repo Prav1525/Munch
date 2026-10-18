@@ -48,7 +48,7 @@ These are agreed goals, not implemented or verified features. Confirm technical 
 - Repository inspection on 2026-10-18 confirmed the repo previously contained only this context file; Android app files have now been added to main.
 - Initial scaffold committed: Kotlin + Jetpack Compose, Gradle Kotlin DSL configuration, Android manifest, a bike-assistant home screen, an explicit three-phase roadmap model, unit tests, README, .gitignore, and a GitHub Actions build/test/APK-artifact workflow.
 - Current UI is a prototype shell only. Microphone, wake-word detection, music control, Google Maps navigation, and Bluetooth headset integration are not implemented yet.
-- No successful Android build, automated test run, APK generation, installation, or real-device verification is confirmed yet.
+- Verified on 2026-10-18: GitHub Actions run https://github.com/Prav1525/Munch/actions/runs/39100218318 completed successfully. Its 'Compile, test, and assemble debug APK' step and 'Upload debug APK' step both passed. The workflow uploaded the `munch-debug-apk` artifact (artifact ID 12125842970; 9,035,721 bytes; SHA-256 `38efcbadb414fe245050559a09a99d7430745987cac75abb5fdf9a2593446a72`). This confirms the scaffold compiles, unit tests pass, and a debug APK was assembled. Installation and real-device verification have not been performed.
 - Local build verification was attempted by cloning the repository, but this environment could not resolve github.com (network/DNS unavailable). GitHub Actions has now started build/test workflow runs for the scaffold commits. At the latest check, runs were still in progress and no pass/fail conclusion was available yet.
 - The phased bike-assistant-to-general-assistant roadmap is recorded here and in README.md.
 
@@ -60,4 +60,4 @@ These are agreed goals, not implemented or verified features. Confirm technical 
 5. Update this file with verified results and the next concrete step before ending the session.
 
 ## Next step
-Get the GitHub Actions build workflow to run and inspect its result. Fix any Gradle/Kotlin/Compose/test failures and rerun until green. Once build/test is verified, continue the first functional milestone: microphone permission and a clearly user-initiated speech-to-text command flow, then music/navigation integrations. Do not offer an APK until a successful build is confirmed.
+Download the `munch-debug-apk` artifact from the successful GitHub Actions run and install/test it on a device before treating it as device-verified. Then continue the first functional milestone: microphone permission and a clearly user-initiated speech-to-text command flow, followed by music/navigation integrations. Keep wake-word and always-on listening claims gated on implementation and real-device testing.
