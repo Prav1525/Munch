@@ -397,7 +397,7 @@ private fun MunchHome(activity: MainActivity) {
                     Text("Hands-free wake phrase", color = Cyan, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("Listen for “Hey Munch”", color = White, fontSize = 13.sp)
+                            Text("Listen for “Hey Jarvis” or “Hey Munch”", color = White, fontSize = 13.sp)
                             Text(if (wakeEnabled) "Listening service enabled" else "Off • uses microphone while enabled", color = Soft, fontSize = 11.sp)
                         }
                         Switch(checked = wakeEnabled, onCheckedChange = { enabled ->
@@ -424,7 +424,7 @@ private fun MunchHome(activity: MainActivity) {
                             }
                         })
                     }
-                    Text("Current wake listening still uses Android speech recognition. A true low-power offline “Hey Munch” detector needs a compatible trained model file; that model is not bundled yet. The headset/call/play button is a push-to-talk fallback while Munch is open. Android battery and background restrictions can still affect listening.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Munch tries its offline Hey Jarvis detector first, then switches to Android speech recognition if the detector stays silent. Keep the hands-free notification visible and allow microphone/background use. The headset button is a fallback.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Free Groq limits and availability can change. If a request fails or times out, Munch returns its offline response instead of waiting indefinitely.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
                     TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
