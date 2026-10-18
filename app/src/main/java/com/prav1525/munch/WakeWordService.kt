@@ -44,6 +44,7 @@ class WakeWordService : Service() {
     private var wakeDetector: WakeWordDetector? = null
     private val detectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var detectorJob: Job? = null
+    private var detectorPaused = false
     private var listening = false
     private var dedicatedDetectorActive = false
     private var forceSpeechFallback = false
@@ -199,6 +200,7 @@ class WakeWordService : Service() {
 
     private fun startExistingWakeDetector() {
         val detector = wakeDetector ?: return
+        detectorPaused = false
         dedicatedDetectorActive = true
         updateNotification("Offline wake detector active — noise filtering enabled")
         detectorJob = detectorScope.launch {
@@ -223,10 +225,15 @@ class WakeWordService : Service() {
     private fun stopWakeDetector(releaseResources: Boolean = false) {
         detectorJob?.cancel()
         detectorJob = null
-        runCatching { wakeDetector?.pauseDetection() }
         if (releaseResources) {
-            runCatching { wakeDetector?.releaseResources() }
+            // AndroidWakeWord's releaseResources() calls AudioRecord.stop() directly.
+            // Avoid calling it after pauseDetection() already stopped the recorder.
+            if (!detectorPaused) runCatching { wakeDetector?.releaseResources() }
             wakeDetector = null
+            detectorPaused = false
+        } else {
+            runCatching { wakeDetector?.pauseDetection() }
+            detectorPaused = true
         }
     }
 
