@@ -115,6 +115,33 @@ object SpotifyAgent {
         }
     }
 
+    fun controlPlayback(context: Context, command: String, callback: (Result<String>) -> Unit) {
+        io.execute {
+            val result = runCatching {
+                val token = validAccessToken(context)
+                val normalized = command.trim().lowercase()
+                val endpoint: String
+                val method: String
+                when (normalized) {
+                    "next" -> { endpoint = "https://api.spotify.com/v1/me/player/next"; method = "POST" }
+                    "previous" -> { endpoint = "https://api.spotify.com/v1/me/player/previous"; method = "POST" }
+                    "pause" -> { endpoint = "https://api.spotify.com/v1/me/player/pause"; method = "PUT" }
+                    "resume", "play" -> { endpoint = "https://api.spotify.com/v1/me/player/play"; method = "PUT" }
+                    "toggle" -> {
+                        val current = apiRequest("GET", "https://api.spotify.com/v1/me/player", token)
+                        val playing = current.optBoolean("is_playing", false)
+                        endpoint = if (playing) "https://api.spotify.com/v1/me/player/pause" else "https://api.spotify.com/v1/me/player/play"
+                        method = "PUT"
+                    }
+                    else -> throw IllegalArgumentException("Unsupported Spotify playback command.")
+                }
+                apiRequest(method, endpoint, token, allowNoContent = true)
+                "Sent Spotify $normalized command."
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post { callback(result) }
+        }
+    }
+
     private fun validAccessToken(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val token = prefs.getString(ACCESS_TOKEN, "").orEmpty()
