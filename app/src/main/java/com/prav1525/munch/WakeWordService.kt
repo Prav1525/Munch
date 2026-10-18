@@ -18,11 +18,11 @@ import com.openwakeword.OpenWakeWord
 import java.util.Locale
 
 /**
- * User-enabled foreground listener for "Hey Munch".
+ * User-enabled foreground listener using a real on-device openWakeWord detector.
  *
- * When app/src/main/assets/hey_munch.onnx is present, a dedicated openWakeWord
- * detector listens locally. Until that trained model is bundled, speech recognition
- * remains a clearly labelled fallback and is not advertised as a true offline detector.
+ * Use the custom "Hey Munch" model when it is bundled. Until then, use the library's
+ * built-in "Hey Jarvis" model to validate offline microphone capture and wake handoff.
+ * Android speech recognition remains a fallback if the detector cannot start.
  */
 class WakeWordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -53,33 +53,36 @@ class WakeWordService : Service() {
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
 
-        if (hasCustomWakeModel()) {
-            try {
-                recognizer?.cancel()
-                recognizer?.destroy()
-                recognizer = null
-                val detector = OpenWakeWord.Builder(this)
-                    .setModelAsset(CUSTOM_MODEL_ASSET)
-                    .setThreshold(WAKE_THRESHOLD)
-                    .setDebounceMs(3_000L)
-                    .build()
-                wakeDetector = detector
-                dedicatedDetectorActive = true
-                updateNotification("Offline “Hey Munch” detector active")
-                detector.start { score ->
-                    if (score >= WAKE_THRESHOLD && dedicatedDetectorActive && !handlingWake) {
-                        handleDedicatedWake()
-                    }
-                }
-                return
-            } catch (_: Exception) {
-                dedicatedDetectorActive = false
-                runCatching { wakeDetector?.release() }
-                wakeDetector = null
-                updateNotification("Wake model unavailable — using speech fallback")
+        try {
+            recognizer?.cancel()
+            recognizer?.destroy()
+            recognizer = null
+            val customModelAvailable = hasCustomWakeModel()
+            val builder = OpenWakeWord.Builder(this)
+                .setThreshold(WAKE_THRESHOLD)
+                .setDebounceMs(3_000L)
+            val detector = if (customModelAvailable) {
+                builder.setModelAsset(CUSTOM_MODEL_ASSET).build()
+            } else {
+                builder.setModel(OpenWakeWord.BuiltInModel.HEY_JARVIS).build()
             }
-        } else {
-            updateNotification("Wake model not installed — speech fallback active")
+            wakeDetector = detector
+            dedicatedDetectorActive = true
+            updateNotification(
+                if (customModelAvailable) "Offline “Hey Munch” detector active"
+                else "Offline “Hey Jarvis” detector active (temporary model)"
+            )
+            detector.start { score ->
+                if (score >= WAKE_THRESHOLD && dedicatedDetectorActive && !handlingWake) {
+                    handleDedicatedWake()
+                }
+            }
+            return
+        } catch (_: Exception) {
+            dedicatedDetectorActive = false
+            runCatching { wakeDetector?.release() }
+            wakeDetector = null
+            updateNotification("Wake detector unavailable — using speech fallback")
         }
 
         startSpeechRecognition()
