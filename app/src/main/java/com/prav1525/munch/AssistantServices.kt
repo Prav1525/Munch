@@ -25,6 +25,12 @@ import java.util.concurrent.Executors
  */
 object AssistantServices {
     private val io = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun deliverResult(callback: (Result<String>) -> Unit, result: Result<String>) {
+        if (Looper.myLooper() == Looper.getMainLooper()) callback(result)
+        else mainHandler.post { callback(result) }
+    }
     private const val PREFS = "munch_preferences"
     private const val HISTORY = "conversation_history"
     private const val API_KEY = "gemini_api_key"
@@ -87,7 +93,7 @@ object AssistantServices {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val key = prefs.getString(GROQ_API_KEY, "").orEmpty()
         if (!prefs.getBoolean(GROQ_FALLBACK_ENABLED, true) || key.isBlank()) {
-            callback(Result.failure(IllegalStateException("Online fallback is disabled or no Groq API key is configured.")))
+            deliverResult(callback, Result.failure(IllegalStateException("Online fallback is disabled or no Groq API key is configured.")))
             return
         }
         io.execute {
@@ -152,7 +158,7 @@ object AssistantServices {
         val key = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(API_KEY, "").orEmpty()
         if (key.isBlank()) {
-            callback(Result.failure(IllegalStateException("Add your Gemini API key in Settings to enable AI answers.")))
+            deliverResult(callback, Result.failure(IllegalStateException("Add your Gemini API key in Settings to enable AI answers.")))
             return
         }
         io.execute {
@@ -206,10 +212,10 @@ object AssistantServices {
                     throw IllegalStateException(lastError)
                 }
 
-                if (!answer.isNullOrBlank()) callback(Result.success(answer!!))
+                if (!answer.isNullOrBlank()) deliverResult(callback, Result.success(answer!!))
                 else throw IllegalStateException(lastError ?: "No supported Gemini model was available. Check your API key and project access.")
             } catch (e: Exception) {
-                callback(Result.failure(e))
+                deliverResult(callback, Result.failure(e))
             }
         }
     }
