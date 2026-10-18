@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <mutex>
@@ -77,9 +78,10 @@ Java_com_prav1525_munch_LocalLlmNative_generate(JNIEnv *env, jobject, jstring pr
     // llama_decode batches are limited by n_batch. Decode long prompts in chunks
     // rather than submitting the entire prompt as one oversized batch.
     constexpr int kPromptBatchSize = 128;
+    llama_batch batch{};
     for (size_t offset = 0; offset < tokens.size();) {
         const int count = (int)std::min((size_t)kPromptBatchSize, tokens.size() - offset);
-        llama_batch batch = llama_batch_get_one(tokens.data() + offset, count);
+        batch = llama_batch_get_one(tokens.data() + offset, count);
         if (llama_decode(g_context, batch) != 0) return env->NewStringUTF("");
         offset += (size_t)count;
     }
