@@ -230,7 +230,7 @@ private fun MunchHome(activity: MainActivity) {
             }
 
             if (showAbout) {
-                InfoCard("ABOUT MUNCH", "Your personal assistant for voice, music, navigation, reminders and simple questions. Munch answers common requests offline; full open-ended AI is not available in this free offline build. Hands-free wake-word activation is not enabled in this build.")
+                InfoCard("ABOUT MUNCH", "Your assistant for voice, app launching, music search, navigation and reminders. Groq can answer open-ended questions when configured; common commands have an offline fallback. “Hey Munch” listening is optional and depends on Android speech-recognition and background-microphone support.")
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
