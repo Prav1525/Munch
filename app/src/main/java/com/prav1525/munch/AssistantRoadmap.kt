@@ -1,25 +1,25 @@
 package com.prav1525.munch
 
 /**
- * Product phases are deliberately modeled separately from UI so the bike-assistant
- * foundation can grow into a general assistant without rewriting the app shell.
+ * Capabilities stay modular so everyday assistance is the core product,
+ * while riding, music, navigation, and other contexts remain optional modules.
  */
 enum class AssistantPhase(val title: String, val description: String) {
-    BIKE_MVP(
-        title = "Bike assistant",
-        description = "Hands-free voice, music controls, navigation, and Bluetooth audio."
+    PERSONAL_ASSISTANT_FOUNDATION(
+        title = "Personal assistant foundation",
+        description = "A clear conversation experience, voice input, and a personal assistant shell."
     ),
-    RIDING_ASSISTANT(
-        title = "Smarter riding assistant",
-        description = "More reliable commands, practical offline support, and background operation."
+    CONNECTED_CAPABILITIES(
+        title = "Connected capabilities",
+        description = "Add optional music, navigation, reminders, and device integrations."
     ),
-    GENERAL_ASSISTANT(
-        title = "General assistant",
-        description = "Everyday questions, tasks, and additional assistant modules."
+    SMARTER_ASSISTANT(
+        title = "Smarter assistant",
+        description = "Improve context, useful offline features, personalization, and background behavior within Android limits."
     )
 }
 
 object AssistantRoadmap {
     val phases: List<AssistantPhase> = AssistantPhase.entries.toList()
-    val currentPhase: AssistantPhase = AssistantPhase.BIKE_MVP
+    val currentPhase: AssistantPhase = AssistantPhase.PERSONAL_ASSISTANT_FOUNDATION
 }
