@@ -40,6 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -139,6 +140,8 @@ private fun MunchHome(activity: MainActivity) {
     var reminderText by remember { mutableStateOf("") }
     var reminderMinutes by remember { mutableStateOf("10") }
     var prompt by remember { mutableStateOf("") }
+    var groqApiKey by remember { mutableStateOf(AssistantServices.getGroqApiKey(context)) }
+    var onlineFallbackEnabled by remember { mutableStateOf(AssistantServices.isGroqFallbackEnabled(context)) }
     var busy by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Ready when you are") }
     val messages = remember { mutableStateListOf<ChatLine>().apply {
@@ -284,8 +287,27 @@ private fun MunchHome(activity: MainActivity) {
                         Text(selectedVoiceLabel, color = White)
                     }
                     Text("Choose an installed English voice. British voices are listed first; voice gender labels depend on your phone's speech engine.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
-                    Text("Offline mode", color = Cyan, fontWeight = FontWeight.SemiBold)
-                    Text("No API key, subscription, or cloud AI request is required. Common commands and simple replies work locally. Open-ended AI answers are limited in this build.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Local-first hybrid AI", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("Munch handles supported commands and simple questions locally first. When a question is outside the offline responder, it can use Groq only if you enable online fallback below. Your API key is stored in app-private preferences; it is not bundled into the source code.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    OutlinedTextField(
+                        value = groqApiKey,
+                        onValueChange = { groqApiKey = it; AssistantServices.saveGroqApiKey(context, it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Groq API key") },
+                        placeholder = { Text("Paste your Groq key") },
+                        singleLine = true
+                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Allow online fallback", color = White, fontSize = 13.sp)
+                            Text(if (onlineFallbackEnabled) "Online AI enabled" else "Offline only", color = Soft, fontSize = 11.sp)
+                        }
+                        Switch(checked = onlineFallbackEnabled, onCheckedChange = {
+                            onlineFallbackEnabled = it
+                            AssistantServices.setGroqFallbackEnabled(context, it)
+                        })
+                    }
+                    Text("Free Groq limits and availability can change. If a request fails or times out, Munch returns its offline response instead of waiting indefinitely.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
                     TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
                         Text("Clear conversation history", color = Violet)
@@ -441,10 +463,35 @@ private fun runAssistantRequest(
         }
         else -> {
             val answer = OfflineAssistant.respond(prompt)
-            messages.add(ChatLine("assistant", answer))
-            AssistantServices.saveMessage(context, "assistant", answer)
-            setStatus("Offline assistant")
-            activity.speak(answer)
+            val needsOnlineHelp = answer.startsWith("I'm in offline mode, so I can't answer that fully yet.")
+            if (needsOnlineHelp && AssistantServices.isGroqFallbackEnabled(context) &&
+                AssistantServices.getGroqApiKey(context).isNotBlank()) {
+                setBusy(true)
+                setStatus("Checking online AI…")
+                AssistantServices.askGroq(context, prompt) { result ->
+                    setBusy(false)
+                    result.fold(
+                        onSuccess = { onlineAnswer ->
+                            messages.add(ChatLine("assistant", onlineAnswer))
+                            AssistantServices.saveMessage(context, "assistant", onlineAnswer)
+                            setStatus("Online answer")
+                            activity.speak(onlineAnswer)
+                        },
+                        onFailure = {
+                            val fallback = OfflineAssistant.respond(prompt)
+                            messages.add(ChatLine("assistant", fallback))
+                            AssistantServices.saveMessage(context, "assistant", fallback)
+                            setStatus("Offline fallback • online AI unavailable")
+                            activity.speak(fallback)
+                        }
+                    )
+                }
+            } else {
+                messages.add(ChatLine("assistant", answer))
+                AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus("Offline assistant")
+                activity.speak(answer)
+            }
         }
     }
 }
