@@ -42,8 +42,9 @@
 - Added native service helpers for Gemini requests, local conversation history, Maps navigation, music-app launch, and reminders.
 - Connected the home-screen shortcuts and conversation panel; added speech-to-text launcher, TextToSpeech responses, Gemini API key settings, history clearing, destination entry, and reminder scheduling UI.
 - Added internet, microphone, notification and exact-alarm permissions and the reminder broadcast receiver.
-- Latest code is being compiled by GitHub Actions. Early commits in this multi-file change can fail because a file was not committed yet; verify the final latest-commit workflow, not an intermediate run.
-- Not yet implemented: a robust hands-free wake phrase, secure server-side AI proxy, full media-session controls, or a real-device test. No APK may be delivered until the final commit's tests and assembleDebug succeed.
+- Verified GitHub Actions run for app code commit `dc32631a3551e52a24fcdfcae863fde737d3fd6` succeeded: https://github.com/Prav1525/Munch/actions/runs/39102303673. The workflow completed `gradle --no-daemon testDebugUnitTest assembleDebug` and uploaded the `munch-debug-apk` artifact.
+- The artifact ZIP was downloaded and inspected; it contains `app-debug.apk` (9,501,617 bytes). SHA-256: `ac0a6294c65ae2088808335489400134d54eedb0c151b44b73106289ac30c093`.
+- Not yet implemented: a robust hands-free wake phrase, secure server-side AI proxy, full media-session controls, or real-device testing. CI validates unit tests and APK assembly, not physical-device behavior.
 
 ## Handoff checklist
 1. Read this file and inspect the latest source before editing.
@@ -51,3 +52,10 @@
 3. Run GitHub Actions unit tests and debug APK assembly; fix failures and rerun.
 4. Update this file with exact outcomes and the next step before ending.
 5. Deliver a new APK only after the latest commit's build/tests pass; separately state that physical-device tests remain outstanding.
+
+## Latest verification outcome (2026-10-18)
+- Android unit tests: passed in GitHub Actions run 39102303673.
+- Debug APK assembly: passed in the same run.
+- Artifact upload: passed; artifact was downloaded and ZIP contents and APK file size were checked locally.
+- Real-device microphone, Gemini API call, Bluetooth headset, reminder notification, Google Maps, and wake-phrase tests have not been performed.
+- Next work: implement/test a privacy-conscious on-device wake phrase strategy and practical media-session controls; consider moving Gemini requests behind a secure backend before any public distribution.
