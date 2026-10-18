@@ -385,7 +385,7 @@ private fun AssistantOrb() {
             .border(1.dp, Color(0x553D4964), CircleShape), contentAlignment = Alignment.Center) {
             Box(modifier = Modifier.fillMaxWidth(0.68f).aspectRatio(1f).border(1.dp, Color(0x668DE8E0), CircleShape).padding(14.dp), contentAlignment = Alignment.Center) {
                 Box(modifier = Modifier.fillMaxSize().clip(CircleShape)
-                    .background(Brush.radialGradient(listOf(Color(0xFF9D91FF), Color(0xFF46547C), Color(0xFF172232))), CircleShape), contentAlignment = Alignment.Center) {
+                    .background(Brush.radialGradient(listOf(Color(0xFF9D91FF), Color(0xFF46547C), Color(0xFF172232)))), contentAlignment = Alignment.Center) {
                     Text("m", color = White, fontSize = 74.sp, fontWeight = FontWeight.Light, letterSpacing = (-5).sp)
                 }
             }
