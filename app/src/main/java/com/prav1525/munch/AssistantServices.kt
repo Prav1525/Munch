@@ -268,9 +268,25 @@ object AssistantServices {
         if (normalized in setOf("youtube music", "youtube music app", "yt music", "ytmusic")) {
             return openMusicApp(context)
         }
+        // Prefer launching the actual installed app. On Android 11+, package visibility can
+        // hide apps unless they are declared in the manifest queries section.
+        if (normalized == "youtube") {
+            val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            val packageName = "com.google.android.youtube"
+            val launch = context.packageManager.getLaunchIntentForPackage(packageName)
+            if (launch != null && runCatching {
+                    context.startActivity(launch.addFlags(flags)); true
+                }.getOrDefault(false)) return true
+            val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com"))
+                .setPackage(packageName).addFlags(flags)
+            if (runCatching { context.startActivity(appIntent); true }.getOrDefault(false)) return true
+            return runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com")).addFlags(flags))
+                true
+            }.getOrDefault(false)
+        }
         val intent = when (normalized) {
             "whatsapp" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/"))
-            "youtube" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com"))
             "browser", "chrome", "internet" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
             "camera" -> Intent("android.media.action.IMAGE_CAPTURE")
             "phone", "dialer", "call" -> Intent(Intent.ACTION_DIAL)
