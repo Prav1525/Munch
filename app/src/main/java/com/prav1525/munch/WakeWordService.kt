@@ -37,6 +37,7 @@ class WakeWordService : Service() {
     private var forceSpeechFallback = false
     private var preferSystemRecognizer = false
     private var handlingWake = false
+    private var awaitingCommand = false
     private var mediaSession: MediaSessionCompat? = null
 
     override fun onCreate() {
@@ -197,10 +198,10 @@ class WakeWordService : Service() {
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: android.os.Bundle?) {
-            updateNotification("Speech fallback ready — say Hey Jarvis or Hey Munch")
+            updateNotification(if (awaitingCommand) "Wake phrase heard — listening for command" else "Speech fallback ready — say Hey Jarvis or Hey Munch")
         }
         override fun onBeginningOfSpeech() {
-            updateNotification("Speech detected — listening for Hey Jarvis or Hey Munch")
+            updateNotification(if (awaitingCommand) "Command speech detected" else "Speech detected — listening for Hey Jarvis or Hey Munch")
         }
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
@@ -210,6 +211,12 @@ class WakeWordService : Service() {
         }
         override fun onError(error: Int) {
             listening = false
+            if (awaitingCommand) {
+                awaitingCommand = false
+                updateNotification("Could not hear the command — listening again")
+                mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+                return
+            }
             val reason = when (error) {
                 SpeechRecognizer.ERROR_AUDIO -> "audio capture error"
                 SpeechRecognizer.ERROR_CLIENT -> "recognizer client reset"
@@ -241,6 +248,22 @@ class WakeWordService : Service() {
         override fun onResults(results: android.os.Bundle?) {
             listening = false
             val phrases = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+            if (awaitingCommand) {
+                awaitingCommand = false
+                val command = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+                if (command.isNotBlank()) {
+                    val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        putExtra("munch_wake_command", command)
+                    }
+                    updateNotification("Command heard — tap to run", command)
+                    runCatching { startActivity(launch) }
+                } else {
+                    updateNotification("No command heard — listening again")
+                }
+                mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+                return
+            }
             // Speech engines return alternatives; don't discard a valid wake phrase just because
             // the first transcript was wrong.
             val wakePhrase = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
@@ -255,6 +278,7 @@ class WakeWordService : Service() {
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
         }
         override fun onPartialResults(partialResults: android.os.Bundle?) {
+            if (awaitingCommand) return
             val phrases = partialResults
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 .orEmpty()
@@ -279,20 +303,24 @@ class WakeWordService : Service() {
     }
 
     private fun handleDedicatedWake() {
-        if (handlingWake) return
+        if (handlingWake || awaitingCommand) return
         dedicatedDetectorActive = false
         runCatching { wakeDetector?.stop() }
         runCatching { wakeDetector?.release() }
         wakeDetector = null
-        handlingWake = true
-        val launch = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            putExtra("munch_wake_listen", true)
-        }
-        updateNotification("Wake phrase heard — tap to continue", listen = true)
-        runCatching { startActivity(launch) }
-        mainHandler.postDelayed({ handlingWake = false }, 10_000)
-        mainHandler.postDelayed({ startRecognition() }, 12_000)
+        // Capture the command in the foreground service instead of relying on Android
+        // allowing a background service to open an Activity immediately after the wake phrase.
+        awaitingCommand = true
+        handlingWake = false
+        updateNotification("Wake phrase heard — say your command")
+        mainHandler.post { startSpeechRecognition() }
+        mainHandler.postDelayed({
+            if (awaitingCommand) {
+                awaitingCommand = false
+                updateNotification("No command heard — listening again")
+                startRecognition()
+            }
+        }, COMMAND_CAPTURE_TIMEOUT_MS)
     }
 
     private fun handlePhrase(phrase: String) {
@@ -387,6 +415,7 @@ class WakeWordService : Service() {
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
         private const val DETECTOR_FALLBACK_DELAY_MS = 20_000L
+        private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
         private const val WAKE_THRESHOLD = 0.55f
     }
