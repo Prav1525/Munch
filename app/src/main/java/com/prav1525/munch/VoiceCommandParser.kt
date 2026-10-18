@@ -1,0 +1,86 @@
+package com.prav1525.munch
+
+import java.util.Locale
+
+/**
+ * Pure parsing for hands-free voice commands. Kept separate from Android services so
+ * wake-prefix handling and common media intents can be covered by fast unit tests.
+ */
+object VoiceCommandParser {
+    private val wakePrefix = Regex(
+        "^\\s*hey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!?\\s-]*(.*)$",
+        RegexOption.IGNORE_CASE
+    )
+    private val youtubePlay = Regex(
+        "^(?:please\\s+)?play\\s+(.+?)(?:\\s+on\\s+youtube)?$",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Returns the text after a leading supported wake phrase, or the original text if absent. */
+    fun stripWakePhrase(raw: String): String {
+        val trimmed = raw.trim()
+        val match = wakePrefix.matchEntire(trimmed)
+        return (match?.groupValues?.getOrNull(1) ?: trimmed)
+            .trim()
+            .trim(',', '.', '!', '?', ':', ';', '-')
+            .trim()
+    }
+
+    /** Recognizes app-level music commands separately from requests for a specific track. */
+    fun isMusicAppCommand(raw: String): Boolean {
+        val command = stripWakePhrase(raw)
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[.!?]+$"), "")
+            .trim()
+        return command in setOf(
+            "play music", "resume music", "continue music",
+            "play youtube music", "open youtube music", "launch youtube music",
+            "open yt music", "play yt music", "resume youtube music"
+        )
+    }
+
+    /** Maps common spoken transport phrases to a small, deterministic command set. */
+    fun mediaCommand(raw: String): String? {
+        val command = stripWakePhrase(raw)
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[.!?]+$"), "")
+            .trim()
+        return when {
+            Regex("^(?:please\\s+)?(?:next|skip)(?:\\s+(?:song|track|music))?$").matches(command) -> "next"
+            Regex("^(?:please\\s+)?(?:previous|prev|go back|last)(?:\\s+(?:song|track|music))?$").matches(command) -> "previous"
+            command in setOf("pause", "pause music", "stop music", "stop playback") -> "pause"
+            command in setOf("resume", "resume music", "continue music", "continue playing", "play music") -> "resume"
+            command in setOf("play pause", "toggle playback", "toggle music") -> "toggle"
+            else -> null
+        }
+    }
+
+    /** Maps simple offline device questions and controls to deterministic skill names. */
+    fun deviceCommand(raw: String): String? {
+        val command = stripWakePhrase(raw)
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[.!?]+$"), "")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+        return when (command) {
+            "what time is it", "tell me the time", "current time", "time please" -> "time"
+            "what is the date", "what's the date", "what date is it", "today's date", "current date" -> "date"
+            "battery", "battery status", "battery level", "what is my battery", "what's my battery",
+            "how much battery", "what is my battery level", "what percentage is my battery" -> "battery"
+            "volume up", "increase volume", "turn volume up", "louder" -> "volume_up"
+            "volume down", "decrease volume", "turn volume down", "quieter" -> "volume_down"
+            "mute", "mute volume", "mute media" -> "mute"
+            "unmute", "unmute volume", "unmute media" -> "unmute"
+            "what can you do", "help", "list your commands", "what commands do you know" -> "help"
+            else -> null
+        }
+    }
+
+    /** Extracts a non-empty play request for YouTube; unrelated commands return null. */
+    fun youtubePlayQuery(raw: String): String? {
+        val command = stripWakePhrase(raw)
+        if (isMusicAppCommand(command)) return null
+        val match = youtubePlay.matchEntire(command) ?: return null
+        return match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+    }
+}

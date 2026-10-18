@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="music_assist_service_description">When you explicitly ask Munch to play a named track in YouTube Music, this optional helper attempts to select a visible matching result. It does not click unrelated results.</string>
+</resources>
