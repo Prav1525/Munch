@@ -37,14 +37,16 @@ Java_com_prav1525_munch_LocalLlmNative_loadModel(JNIEnv *env, jobject, jstring p
     if (!g_model) return JNI_FALSE;
 
     llama_context_params context_params = llama_context_default_params();
-    context_params.n_ctx = 2048;
-    context_params.n_batch = 256;
+    // Keep inference memory and latency more manageable on 8 GB Android devices.
+    context_params.n_ctx = 1024;
+    context_params.n_batch = 128;
     context_params.n_threads = 4;
     context_params.n_threads_batch = 4;
     g_context = llama_init_from_model(g_model, context_params);
     if (!g_context) { release_locked(); return JNI_FALSE; }
     g_sampler = llama_sampler_init_greedy();
-    return g_sampler ? JNI_TRUE : JNI_FALSE;
+    if (!g_sampler) { release_locked(); return JNI_FALSE; }
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -60,14 +62,30 @@ Java_com_prav1525_munch_LocalLlmNative_generate(JNIEnv *env, jobject, jstring pr
     if (token_count <= 0) return env->NewStringUTF("");
     tokens.resize((size_t)token_count);
 
+    const int context_size = (int)llama_n_ctx(g_context);
+    // Reserve room for generated output and keep only the most recent prompt tokens if needed.
+    const int output_limit = maxTokens > 0 ? (maxTokens > 48 ? 48 : maxTokens) : 48;
+    const int prompt_limit = context_size - output_limit - 1;
+    if (prompt_limit <= 0) return env->NewStringUTF("");
+    if ((int)tokens.size() > prompt_limit) {
+        tokens.erase(tokens.begin(), tokens.end() - prompt_limit);
+    }
+
     llama_memory_clear(llama_get_memory(g_context), true);
     llama_sampler_reset(g_sampler);
-    llama_batch batch = llama_batch_get_one(tokens.data(), (int)tokens.size());
-    if (llama_decode(g_context, batch) != 0) return env->NewStringUTF("");
+
+    // llama_decode batches are limited by n_batch. Decode long prompts in chunks
+    // rather than submitting the entire prompt as one oversized batch.
+    constexpr int kPromptBatchSize = 128;
+    for (size_t offset = 0; offset < tokens.size();) {
+        const int count = (int)std::min((size_t)kPromptBatchSize, tokens.size() - offset);
+        llama_batch batch = llama_batch_get_one(tokens.data() + offset, count);
+        if (llama_decode(g_context, batch) != 0) return env->NewStringUTF("");
+        offset += (size_t)count;
+    }
 
     std::string output;
-    const int limit = maxTokens > 0 ? (maxTokens > 128 ? 128 : maxTokens) : 96;
-    for (int i = 0; i < limit; ++i) {
+    for (int i = 0; i < output_limit; ++i) {
         const llama_token token = llama_sampler_sample(g_sampler, g_context, -1);
         if (llama_vocab_is_eog(vocab, token)) break;
         char piece[512];
