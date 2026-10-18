@@ -261,7 +261,7 @@ class WakeWordService : Service() {
                 val recognized = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
                 val command = VoiceCommandParser.stripWakePhrase(recognized)
                 if (command.isNotBlank()) {
-                    if (!handleMediaCommandInService(command)) {
+                    if (!handleCommandInService(command)) {
                         val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                             putExtra("munch_wake_command", command)
@@ -373,6 +373,97 @@ class WakeWordService : Service() {
         return true
     }
 
+    /**
+     * Executes supported, low-risk commands directly from the foreground service. This is
+     * the key hands-free path: common tasks do not depend on MainActivity being allowed to open.
+     * Complex or ambiguous requests still go to the Activity/assistant UI.
+     */
+    private fun handleCommandInService(rawCommand: String): Boolean {
+        if (handleMediaCommandInService(rawCommand)) return true
+        val command = VoiceCommandParser.stripWakePhrase(rawCommand)
+            .trim().trimEnd('.', '!', '?')
+        if (command.isBlank()) return false
+
+        fun report(message: String) {
+            updateNotification(message, command)
+            AssistantServices.saveMessage(this, "assistant", message)
+        }
+
+        val spotifyPlay = Regex("^play\\s+(.+?)\\s+on\\s+spotify$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (spotifyPlay != null) {
+            val query = spotifyPlay.groupValues[1].trim()
+            if (!SpotifyAgent.isConnected(this)) {
+                report("Spotify is not connected to Munch. Connect it in Settings before asking me to play $query.")
+            } else {
+                updateNotification("Searching Spotify for $query…", command)
+                SpotifyAgent.searchAndPlay(this, query) { result ->
+                    report(result.getOrElse { "Spotify could not play $query: " + (it.message ?: "unknown error") })
+                }
+            }
+            return true
+        }
+
+        val youtubeMusicPlay = Regex("^play\\s+(.+?)\\s+on\\s+(?:youtube music|yt music|ytmusic)$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (youtubeMusicPlay != null) {
+            val query = youtubeMusicPlay.groupValues[1].trim()
+            val opened = AssistantServices.searchMusic(this, query)
+            val message = when {
+                !opened -> "I couldn't open YouTube Music search for $query."
+                MusicAppAssistService.isEnabled(this) -> "Opened YouTube Music search for $query. The enabled helper will try to select a matching visible result."
+                else -> "Opened YouTube Music search for $query. Enable Munch's YouTube Music helper in Accessibility settings for automatic result selection."
+            }
+            report(message)
+            return true
+        }
+
+        val youtubePlay = Regex("^play\\s+(.+?)\\s+on\\s+youtube$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (youtubePlay != null) {
+            val query = youtubePlay.groupValues[1].trim()
+            updateNotification("Finding a YouTube result for $query…", command)
+            AssistantServices.playYouTubeSearch(this, query) { opened, autoPlay ->
+                report(when {
+                    !opened -> "I couldn't open YouTube for $query."
+                    autoPlay -> "Opened a YouTube video for $query. Confirm playback in YouTube."
+                    else -> "Opened YouTube, but automatic playback could not be confirmed for $query."
+                })
+            }
+            return true
+        }
+
+        val openApp = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(.+)$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (openApp != null) {
+            val app = openApp.groupValues[1].trim()
+            val opened = AssistantServices.openInstalledApp(this, app)
+            report(if (opened) "Opened $app." else "I couldn't open an installed app named $app.")
+            return true
+        }
+
+        val reminder = Regex("^remind me in (\\d+)\\s*(minute|minutes|min|hour|hours|hr|hrs)\\s*(?:to)?\\s*(.*)$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (reminder != null) {
+            val amount = reminder.groupValues[1].toLongOrNull() ?: 0L
+            val unit = reminder.groupValues[2].lowercase(Locale.ROOT)
+            val note = reminder.groupValues[3].ifBlank { "Your reminder" }
+            val multiplier = if (unit.startsWith("h")) 3_600_000L else 60_000L
+            val delay = runCatching { Math.multiplyExact(amount, multiplier) }.getOrDefault(0L)
+            if (delay <= 0L) {
+                report("Please give me a valid reminder time.")
+            } else {
+                val scheduled = runCatching {
+                    AssistantServices.scheduleReminder(this, note, System.currentTimeMillis() + delay)
+                }.getOrDefault(false)
+                report(if (scheduled) "Reminder set: $note in ${reminder.groupValues[1]} ${reminder.groupValues[2]}."
+                    else "I couldn't schedule that reminder. Check Android's exact-alarm permission.")
+            }
+            return true
+        }
+        return false
+    }
+
     private fun handlePhrase(phrase: String) {
         val match = Regex(".*?\\bhey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
             ?: return
@@ -381,7 +472,7 @@ class WakeWordService : Service() {
         val command = match.groupValues.getOrElse(1) { "" }.trim().trim(',', '.', '!', '?')
         // Media transport commands are handled inside the foreground service so the
         // music app stays foreground instead of being covered by Munch's activity.
-        if (command.isNotBlank() && handleMediaCommandInService(command)) {
+        if (command.isNotBlank() && handleCommandInService(command)) {
             handlingWake = false
             mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
             return
