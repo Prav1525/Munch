@@ -40,44 +40,56 @@ object AssistantServices {
         }
         io.execute {
             try {
-                // Use a currently recommended model for new projects. Gemini 2.5 access
-                // has been limited for some new projects, which can surface as HTTP 404.
-                val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent")
-                val connection = (endpoint.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 15000
-                    readTimeout = 30000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    setRequestProperty("x-goog-api-key", key)
-                }
-                val body = JSONObject()
-                    .put("contents", JSONArray().put(JSONObject().put("parts",
-                        JSONArray().put(JSONObject().put("text", prompt)))))
-                    .toString()
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val raw = stream.bufferedReader().use { it.readText() }
-                connection.disconnect()
-                if (code !in 200..299) {
+                // Prefer the current stable Flash model. Try alternatives if a model-specific
+                // 404 indicates that this model is unavailable to the configured project.
+                val models = listOf("gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite")
+                var answer: String? = null
+                var lastError: String? = null
+
+                for (model in models) {
+                    val endpoint = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+                    val connection = (endpoint.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 15000
+                        readTimeout = 30000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                        setRequestProperty("x-goog-api-key", key)
+                    }
+                    val body = JSONObject()
+                        .put("contents", JSONArray().put(JSONObject().put("parts",
+                            JSONArray().put(JSONObject().put("text", prompt)))))
+                        .toString()
+                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    val code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    connection.disconnect()
+
+                    if (code in 200..299) {
+                        val json = JSONObject(raw)
+                        answer = json.optJSONArray("candidates")?.optJSONObject(0)
+                            ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
+                            .orEmpty()
+                        if (answer.isNullOrBlank()) {
+                            lastError = "The AI service returned an empty answer."
+                            break
+                        }
+                        break
+                    }
+
                     val detail = runCatching {
                         JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty()
                     }.getOrDefault("")
-                    val safeDetail = detail.take(240)
-                    val message = if (safeDetail.isNotBlank()) {
-                        "Gemini API error (HTTP $code): $safeDetail"
-                    } else {
-                        "Gemini API error (HTTP $code). Check the model access and API key in Google AI Studio."
-                    }
-                    throw IllegalStateException(message)
+                    lastError = "Gemini API error (HTTP $code)" + if (detail.isNotBlank()) ": ${detail.take(240)}" else "."
+
+                    // Do not mask invalid-key, permission, or quota errors by retrying them.
+                    if (code == 404) continue
+                    throw IllegalStateException(lastError)
                 }
-                val json = JSONObject(raw)
-                val answer = json.optJSONArray("candidates")?.optJSONObject(0)
-                    ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
-                    .orEmpty()
-                if (answer.isBlank()) throw IllegalStateException("The AI service returned an empty answer.")
-                callback(Result.success(answer))
+
+                if (!answer.isNullOrBlank()) callback(Result.success(answer!!))
+                else throw IllegalStateException(lastError ?: "No supported Gemini model was available. Check your API key and project access.")
             } catch (e: Exception) {
                 callback(Result.failure(e))
             }
