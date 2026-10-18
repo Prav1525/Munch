@@ -1,8 +1,16 @@
 package com.prav1525.munch
 
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,15 +30,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,6 +54,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import java.util.Locale
 
 private val Void = Color(0xFF080B12)
 private val SurfaceDark = Color(0xFF111722)
@@ -53,21 +67,73 @@ private val Soft = Color(0xFF9BA6B9)
 private val Hairline = Color(0xFF283143)
 
 class MainActivity : ComponentActivity() {
+    private var tts: TextToSpeech? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { MunchHome() } }
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault()
+        }
+        setContent { MaterialTheme { MunchHome(this) } }
+    }
+
+    fun speak(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "munch-response")
+    }
+
+    override fun onDestroy() {
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        super.onDestroy()
     }
 }
 
+private data class ChatLine(val speaker: String, val message: String)
+
 @Composable
-private fun MunchHome() {
+private fun MunchHome(activity: MainActivity) {
+    val context = activity
     var selectedAction by remember { mutableStateOf<String?>(null) }
     var showAbout by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showConversation by remember { mutableStateOf(false) }
+    var showMapDialog by remember { mutableStateOf(false) }
+    var showReminderDialog by remember { mutableStateOf(false) }
+    var destination by remember { mutableStateOf("") }
+    var reminderText by remember { mutableStateOf("") }
+    var reminderMinutes by remember { mutableStateOf("10") }
+    var apiKey by remember { mutableStateOf("") }
+    var prompt by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf("Ready when you are") }
+    val messages = remember { mutableStateListOf<ChatLine>().apply {
+        AssistantServices.readHistory(context).forEach { add(ChatLine(it.first, it.second)) }
+    } }
+
+    val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+            if (spoken.isNotBlank()) {
+                prompt = spoken
+                runAssistantRequest(context, activity, spoken, messages, { busy = it }, { statusText = it }, { prompt = "" })
+            } else statusText = "I didn't catch that. Try again."
+        } else statusText = "Voice input was cancelled or unavailable."
+    }
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) launchSpeech(speechLauncher) { statusText = it }
+        else statusText = "Microphone permission is needed for voice conversations."
+    }
+
+    fun beginVoice() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            launchSpeech(speechLauncher) { statusText = it }
+        } else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Void) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
+            modifier = Modifier.fillMaxSize()
                 .background(Brush.verticalGradient(listOf(Color(0xFF111322), Void, Void)))
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 22.dp, vertical = 22.dp),
@@ -79,32 +145,28 @@ private fun MunchHome() {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                    Box(
-                        modifier = Modifier.size(42.dp).clip(RoundedCornerShape(14.dp))
-                            .background(Brush.linearGradient(listOf(Violet, Cyan))),
-                        contentAlignment = Alignment.Center
-                    ) { Text("m", color = Void, fontSize = 28.sp, fontWeight = FontWeight.Black) }
+                    Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Violet, Cyan))), contentAlignment = Alignment.Center) {
+                        Text("m", color = Void, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                         Text("munch", color = White, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
                         Text("YOUR PERSONAL AI", color = Soft, fontSize = 9.sp, letterSpacing = 2.sp)
                     }
                 }
-                Box(
-                    modifier = Modifier.clip(CircleShape).border(1.dp, Hairline, CircleShape)
-                        .background(SurfaceDark).clickable { showAbout = !showAbout }
-                        .padding(horizontal = 12.dp, vertical = 9.dp)
-                ) {
-                    Text(if (showAbout) "v0.2 • PREVIEW" else "ABOUT  ⤢", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.clip(CircleShape).border(1.dp, Hairline, CircleShape).background(SurfaceDark)
+                        .clickable { showSettings = true }.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                        Text("SETTINGS", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Box(Modifier.clip(CircleShape).border(1.dp, Hairline, CircleShape).background(SurfaceDark)
+                        .clickable { showAbout = !showAbout }.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                        Text(if (showAbout) "CLOSE" else "ABOUT", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
 
             if (showAbout) {
-                Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Hairline)) {
-                    Text(
-                        "Munch is growing into a personal assistant for everyday life, with voice, music, navigation and more added in stages. This screen is a design preview; assistant actions are not connected yet.",
-                        color = Soft, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(16.dp)
-                    )
-                }
+                InfoCard("ABOUT MUNCH", "Your personal assistant for everyday questions, voice, music, navigation and reminders. AI answers need your own Gemini API key in Settings. Hands-free wake-word activation is not enabled in this build.")
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -117,15 +179,11 @@ private fun MunchHome() {
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("WHAT'S ON YOUR MIND?", color = Soft, fontSize = 10.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.SemiBold)
-                Button(
-                    onClick = { selectedAction = "conversation" },
-                    modifier = Modifier.fillMaxWidth().height(58.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Void)
-                ) { Text("✳   Start a conversation", fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
-                if (selectedAction == "conversation") {
-                    Text("Voice chat is the next build milestone. For now, this is a preview of the conversation entry point.", color = Cyan, fontSize = 12.sp, lineHeight = 18.sp)
+                Button(onClick = { showConversation = true; beginVoice() }, modifier = Modifier.fillMaxWidth().height(58.dp),
+                    shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Void)) {
+                    Text(if (busy) "◌  Thinking…" else "✳   Start a conversation", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
+                Text(statusText, color = Cyan, fontSize = 12.sp, lineHeight = 18.sp)
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -134,37 +192,187 @@ private fun MunchHome() {
                     Text("PERSONAL SPACE", color = Violet, fontSize = 9.sp, letterSpacing = 1.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ShortcutCard("✦", "Ask anything", "Ideas & answers", Modifier.weight(1f)) { selectedAction = "ask" }
-                    ShortcutCard("♫", "Your music", "Play what fits", Modifier.weight(1f)) { selectedAction = "music" }
+                    ShortcutCard("✦", "Ask anything", "Ideas & answers", Modifier.weight(1f)) { showConversation = true }
+                    ShortcutCard("♫", "Your music", "Open music app", Modifier.weight(1f)) { AssistantServices.openMusic(context); statusText = "Opening your music app" }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ShortcutCard("⌁", "Get somewhere", "Routes & places", Modifier.weight(1f)) { selectedAction = "places" }
-                    ShortcutCard("◷", "My day", "Plans & reminders", Modifier.weight(1f)) { selectedAction = "day" }
+                    ShortcutCard("⌁", "Get somewhere", "Routes & places", Modifier.weight(1f)) { showMapDialog = true }
+                    ShortcutCard("◷", "My day", "Plans & reminders", Modifier.weight(1f)) { showReminderDialog = true }
                 }
-                selectedAction?.takeIf { it != "conversation" }?.let { action ->
-                    val detail = when (action) {
-                        "ask" -> "Everyday questions and personal answers are planned for the conversation module."
-                        "music" -> "Music-app controls will be added as a separate capability."
-                        "places" -> "Place search and navigation will be added as an optional capability."
-                        else -> "Planning and reminders are part of the future personal-assistant roadmap."
-                    }
-                    Card(colors = CardDefaults.cardColors(containerColor = SurfaceLift), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Hairline)) {
-                        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text("COMING IN FUTURE BUILDS", color = Violet, fontSize = 9.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
-                            Text(detail, color = Soft, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+
+            if (showConversation) {
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, Hairline)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("YOUR CONVERSATION", color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            TextButton(onClick = { showConversation = false }) { Text("CLOSE", color = Cyan) }
+                        }
+                        if (messages.isEmpty()) Text("Ask a question by voice or type below. Your conversation is saved on this device.", color = Soft, fontSize = 13.sp)
+                        messages.takeLast(12).forEach { line ->
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(if (line.speaker == "user") "YOU" else "MUNCH", color = if (line.speaker == "user") Violet else Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Text(line.message, color = White, fontSize = 13.sp, lineHeight = 19.sp)
+                            }
+                        }
+                        OutlinedTextField(value = prompt, onValueChange = { prompt = it }, modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Ask Munch") }, shape = RoundedCornerShape(14.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { beginVoice() }, colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) { Text("🎙 Voice", color = Cyan) }
+                            Button(onClick = {
+                                val q = prompt.trim()
+                                if (q.isNotEmpty() && !busy) runAssistantRequest(context, activity, q, messages, { busy = it }, { statusText = it }, { prompt = "" })
+                            }, enabled = !busy && prompt.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Void)) {
+                                Text(if (busy) "Thinking…" else "Send")
+                            }
                         }
                     }
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp),
-                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(6.dp).background(Cyan, CircleShape))
                 Spacer(Modifier.size(8.dp))
                 Text("MADE TO ADAPT TO YOU", color = Soft, fontSize = 9.sp, letterSpacing = 1.8.sp)
             }
+        }
+    }
+
+    if (showSettings) {
+        AlertDialog(
+            onDismissRequest = { showSettings = false },
+            containerColor = SurfaceDark,
+            title = { Text("Munch settings", color = White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Gemini API key", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text("Paste your API key") },
+                        placeholder = { Text("Key stays on this device") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    Text("The key is stored in this app's private preferences, not in GitHub source. For a public production app, a secured backend is safer because client-side keys can be extracted.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
+                    TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
+                        Text("Clear conversation history", color = Violet)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { AssistantServices.saveApiKey(context, apiKey); apiKey = ""; showSettings = false; statusText = "AI settings saved" }) { Text("SAVE", color = Cyan) } },
+            dismissButton = { TextButton(onClick = { showSettings = false }) { Text("CANCEL", color = Soft) } }
+        )
+    }
+
+    if (showMapDialog) {
+        AlertDialog(onDismissRequest = { showMapDialog = false }, containerColor = SurfaceDark,
+            title = { Text("Where to?", color = White) },
+            text = { OutlinedTextField(value = destination, onValueChange = { destination = it }, label = { Text("Destination") }, singleLine = true) },
+            confirmButton = { TextButton(onClick = { if (destination.isNotBlank()) { AssistantServices.openMaps(context, destination.trim()); statusText = "Opening navigation"; showMapDialog = false } }) { Text("NAVIGATE", color = Cyan) } },
+            dismissButton = { TextButton(onClick = { showMapDialog = false }) { Text("CANCEL", color = Soft) } })
+    }
+
+    if (showReminderDialog) {
+        AlertDialog(onDismissRequest = { showReminderDialog = false }, containerColor = SurfaceDark,
+            title = { Text("Create a reminder", color = White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = reminderText, onValueChange = { reminderText = it }, label = { Text("What should I remind you?") })
+                    OutlinedTextField(value = reminderMinutes, onValueChange = { reminderMinutes = it.filter(Char::isDigit).take(4) },
+                        label = { Text("In how many minutes?") }, singleLine = true)
+                    Text("Exact reminders may require alarm permission in Android settings. Notifications must also be allowed.", color = Soft, fontSize = 11.sp, lineHeight = 15.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                val mins = reminderMinutes.toLongOrNull()
+                if (reminderText.isNotBlank() && mins != null && mins > 0) {
+                    val scheduled = runCatching { AssistantServices.scheduleReminder(context, reminderText.trim(), System.currentTimeMillis() + mins * 60_000L) }.getOrDefault(false)
+                    statusText = if (scheduled) "Reminder scheduled for ${mins} minutes from now" else "Allow exact alarms in Android settings, then try again"
+                    showReminderDialog = false
+                }
+            }) { Text("SET REMINDER", color = Cyan) } },
+            dismissButton = { TextButton(onClick = { showReminderDialog = false }) { Text("CANCEL", color = Soft) } })
+    }
+}
+
+private fun launchSpeech(
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
+    status: (String) -> Unit
+) {
+    try {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Munch")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        }
+        launcher.launch(intent)
+        status("Listening through Android speech recognition…")
+    } catch (_: Exception) {
+        status("Speech recognition is unavailable on this device.")
+    }
+}
+
+private fun runAssistantRequest(
+    context: android.content.Context,
+    activity: MainActivity,
+    prompt: String,
+    messages: MutableList<ChatLine>,
+    setBusy: (Boolean) -> Unit,
+    setStatus: (String) -> Unit,
+    clearPrompt: () -> Unit
+) {
+    messages.add(ChatLine("user", prompt))
+    AssistantServices.saveMessage(context, "user", prompt)
+    clearPrompt()
+    val lower = prompt.lowercase(Locale.ROOT)
+    when {
+        lower.startsWith("navigate to ") || lower.startsWith("take me to ") || lower.startsWith("directions to ") -> {
+            val destination = prompt.substringAfter(" to ", "").trim()
+            if (destination.isNotBlank()) {
+                AssistantServices.openMaps(context, destination)
+                val answer = "Opening Google Maps for $destination."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            } else setStatus("Tell me the destination you want.")
+        }
+        lower.contains("play music") || lower == "music" || lower.contains("open music") -> {
+            AssistantServices.openMusic(context)
+            val answer = "Opening your music app."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        lower.startsWith("remind me in ") -> {
+            val match = Regex("remind me in (\\d+)\\s*(minute|minutes|min|hour|hours|hr|hrs)\\s*(?:to)?\\s*(.*)", RegexOption.IGNORE_CASE).find(prompt)
+            if (match != null) {
+                val amount = match.groupValues[1].toLongOrNull() ?: 0L
+                val unit = match.groupValues[2].lowercase(Locale.ROOT)
+                val note = match.groupValues[3].ifBlank { "Your reminder" }
+                val millis = amount * if (unit.startsWith("h")) 3_600_000L else 60_000L
+                val scheduled = runCatching { AssistantServices.scheduleReminder(context, note, System.currentTimeMillis() + millis) }.getOrDefault(false)
+                val answer = if (scheduled) "Okay, I'll remind you about $note in ${match.groupValues[1]} ${match.groupValues[2]}." else "I couldn't schedule that exact reminder. Check Android's exact-alarm permission."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            } else setStatus("Try: remind me in 10 minutes to call home.")
+        }
+        else -> {
+            setBusy(true)
+            setStatus("Thinking with Gemini…")
+            AssistantServices.ask(context, prompt) { result ->
+                activity.runOnUiThread {
+                    setBusy(false)
+                    val answer = result.getOrElse { it.message ?: "I couldn't get an answer. Check your connection and Gemini API key." }
+                    messages.add(ChatLine("assistant", answer))
+                    AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(if (result.isSuccess) "Answered by Gemini" else answer)
+                    if (result.isSuccess) activity.speak(answer)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoCard(title: String, detail: String) {
+    Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Hairline)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, color = Violet, fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+            Text(detail, color = Soft, fontSize = 12.sp, lineHeight = 18.sp)
         }
     }
 }
@@ -172,28 +380,18 @@ private fun MunchHome() {
 @Composable
 private fun AssistantOrb() {
     Box(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier.fillMaxWidth(0.72f).aspectRatio(1f).clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFF34315A), Color(0xFF1B253C), Void)))
-                .border(1.dp, Color(0x553D4964), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier.fillMaxWidth(0.68f).aspectRatio(1f)
-                    .border(1.dp, Color(0x668DE8E0), CircleShape).padding(14.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                        .background(Brush.radialGradient(listOf(Color(0xFF9D91FF), Color(0xFF46547C), Color(0xFF172232)))),
-                    contentAlignment = Alignment.Center
-                ) { Text("m", color = White, fontSize = 74.sp, fontWeight = FontWeight.Light, letterSpacing = (-5).sp) }
+        Box(modifier = Modifier.fillMaxWidth(0.72f).aspectRatio(1f).clip(CircleShape)
+            .background(Brush.radialGradient(listOf(Color(0xFF34315A), Color(0xFF1B253C), Void)))
+            .border(1.dp, Color(0x553D4964), CircleShape), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxWidth(0.68f).aspectRatio(1f).border(1.dp, Color(0x668DE8E0), CircleShape).padding(14.dp), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    .background(Brush.radialGradient(listOf(Color(0xFF9D91FF), Color(0xFF46547C), Color(0xFF172232))), CircleShape), contentAlignment = Alignment.Center) {
+                    Text("m", color = White, fontSize = 74.sp, fontWeight = FontWeight.Light, letterSpacing = (-5).sp)
+                }
             }
         }
-        Column(
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
+        Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("HERE WHEN YOU NEED ME", color = White, fontSize = 10.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.SemiBold)
             Text("Voice-first • Built around you", color = Soft, fontSize = 11.sp)
         }
@@ -202,12 +400,8 @@ private fun AssistantOrb() {
 
 @Composable
 private fun ShortcutCard(icon: String, title: String, detail: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Card(
-        modifier = modifier.clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, Hairline)
-    ) {
+    Card(modifier = modifier.clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, Hairline)) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(icon, color = Violet, fontSize = 22.sp)
             Text(title, color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
