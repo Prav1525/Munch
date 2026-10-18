@@ -44,6 +44,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -142,6 +143,8 @@ private fun MunchHome(activity: MainActivity) {
     var prompt by remember { mutableStateOf("") }
     var groqApiKey by remember { mutableStateOf(AssistantServices.getGroqApiKey(context)) }
     var onlineFallbackEnabled by remember { mutableStateOf(AssistantServices.isGroqFallbackEnabled(context)) }
+    var wakeEnabled by remember { mutableStateOf(context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).getBoolean("wake_word_enabled", false)) }
+    var pendingWakeEnable by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Ready when you are") }
     val messages = remember { mutableStateListOf<ChatLine>().apply {
@@ -158,14 +161,38 @@ private fun MunchHome(activity: MainActivity) {
         } else statusText = "Voice input was cancelled or unavailable."
     }
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) launchSpeech(speechLauncher) { statusText = it }
-        else statusText = "Microphone permission is needed for voice conversations."
+        if (granted && pendingWakeEnable) {
+            pendingWakeEnable = false
+            context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit().putBoolean("wake_word_enabled", true).apply()
+            wakeEnabled = true
+            androidx.core.content.ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+            statusText = "Hey Munch listening is on. Keep the persistent notification visible."
+        } else if (granted) launchSpeech(speechLauncher) { statusText = it }
+        else {
+            pendingWakeEnable = false
+            wakeEnabled = false
+            statusText = "Microphone permission is needed for voice conversations and wake-word listening."
+        }
     }
 
     fun beginVoice() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             launchSpeech(speechLauncher) { statusText = it }
         } else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    val wakeCommand = activity.intent.getStringExtra("munch_wake_command")
+    val wakeListenOnly = activity.intent.getBooleanExtra("munch_wake_listen", false)
+    LaunchedEffect(wakeCommand, wakeListenOnly) {
+        if (!wakeCommand.isNullOrBlank()) {
+            showConversation = true
+            runAssistantRequest(context, activity, wakeCommand, messages, { busy = it }, { statusText = it }, { prompt = "" })
+            activity.intent.removeExtra("munch_wake_command")
+        } else if (wakeListenOnly) {
+            showConversation = true
+            beginVoice()
+            activity.intent.removeExtra("munch_wake_listen")
+        }
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Void) {
@@ -307,6 +334,32 @@ private fun MunchHome(activity: MainActivity) {
                             AssistantServices.setGroqFallbackEnabled(context, it)
                         })
                     }
+                    Text("Hands-free wake phrase", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Listen for “Hey Munch”", color = White, fontSize = 13.sp)
+                            Text(if (wakeEnabled) "Listening service enabled" else "Off • uses microphone while enabled", color = Soft, fontSize = 11.sp)
+                        }
+                        Switch(checked = wakeEnabled, onCheckedChange = { enabled ->
+                            if (enabled) {
+                                pendingWakeEnable = true
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                    pendingWakeEnable = false
+                                    context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit().putBoolean("wake_word_enabled", true).apply()
+                                    wakeEnabled = true
+                                    ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+                                    statusText = "Hey Munch listening is on."
+                                } else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                pendingWakeEnable = false
+                                wakeEnabled = false
+                                context.getSharedPreferences("munch_preferences", android.content.Context.MODE_PRIVATE).edit().putBoolean("wake_word_enabled", false).apply()
+                                context.stopService(Intent(context, WakeWordService::class.java))
+                                statusText = "Wake-word listening stopped."
+                            }
+                        })
+                    }
+                    Text("Wake-word detection uses Android speech recognition and may require network access; it is not a guaranteed offline keyword engine. Android may stop microphone access under battery or background restrictions.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Free Groq limits and availability can change. If a request fails or times out, Munch returns its offline response instead of waiting indefinitely.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Saved conversations: ${messages.size}", color = Soft, fontSize = 12.sp)
                     TextButton(onClick = { AssistantServices.clearHistory(context); messages.clear(); statusText = "Conversation history cleared" }) {
@@ -425,6 +478,14 @@ private fun runAssistantRequest(
                 setStatus(answer); activity.speak(answer)
             } else setStatus("Tell me the destination you want.")
         }
+        Regex("^play\\s+(.+)$", RegexOption.IGNORE_CASE).matches(prompt.trim()) &&
+            !lower.matches(Regex("^play\\s+(music|my music|some music|the music)[.! ]*$")) -> {
+            val query = prompt.trim().replaceFirst(Regex("^play\\s+", RegexOption.IGNORE_CASE), "").trim().trimEnd('.', '!')
+            val opened = AssistantServices.searchMusic(context, query)
+            val answer = if (opened) "Searching your music for $query." else "I couldn't open a music search for $query."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
         lower.contains("play music") || lower == "music" || lower.contains("open music") -> {
             AssistantServices.openMusic(context)
             val answer = "Opening your music app."
@@ -445,6 +506,13 @@ private fun runAssistantRequest(
                 else -> app.replaceFirstChar { it.uppercase() }
             }
             val answer = if (opened) "Opening $label." else "I couldn't find an app to open for $app."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        Regex("^(open|launch|start|show)\\s+(.+?)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            val appName = prompt.trim().replace(Regex("^(open|launch|start|show)\\s+", RegexOption.IGNORE_CASE), "").trim().trimEnd('.', '!')
+            val opened = AssistantServices.openInstalledApp(context, appName)
+            val answer = if (opened) "Opening $appName." else "I couldn't find an installed app named $appName."
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
         }
