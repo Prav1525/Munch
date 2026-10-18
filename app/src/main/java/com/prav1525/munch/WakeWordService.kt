@@ -18,6 +18,8 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.content.pm.ServiceInfo
 import com.openwakeword.OpenWakeWord
 import java.util.Locale
@@ -40,10 +42,24 @@ class WakeWordService : Service() {
     private var handlingWake = false
     private var awaitingCommand = false
     private var mediaSession: MediaSessionCompat? = null
+    private var wakeTts: TextToSpeech? = null
+    @Volatile private var wakeTtsReady = false
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // A short spoken acknowledgement makes a wake event observable instead of silently
+        // switching microphone modes. Command capture starts after the acknowledgement ends.
+        wakeTts = TextToSpeech(applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val engine = wakeTts
+                if (engine != null) {
+                    val languageResult = engine.setLanguage(Locale.US)
+                    wakeTtsReady = languageResult != TextToSpeech.LANG_MISSING_DATA &&
+                        languageResult != TextToSpeech.LANG_NOT_SUPPORTED
+                }
+            }
+        }
         // Keep a media session active while the user-enabled foreground listener runs so
         // Bluetooth/headset media buttons can reach Munch even when its Activity is hidden.
         mediaSession = MediaSessionCompat(this, "MunchNeckband").apply {
@@ -109,9 +125,12 @@ class WakeWordService : Service() {
             recognizer?.destroy()
             recognizer = null
             val customModelAvailable = hasCustomWakeModel()
+            // Let the detector report lower scores; apply the media-aware threshold ourselves.
+            // This avoids the library's fixed threshold preventing the more sensitive quiet-room
+            // setting from ever being observed by the callback.
             val builder = OpenWakeWord.Builder(this)
-                .setThreshold(WAKE_THRESHOLD)
-                .setDebounceMs(3_000L)
+                .setThreshold(DETECTOR_CALLBACK_THRESHOLD)
+                .setDebounceMs(2_200L)
             val detector = if (customModelAvailable) {
                 builder.setModelAsset(CUSTOM_MODEL_ASSET).build()
             } else {
@@ -124,10 +143,14 @@ class WakeWordService : Service() {
                 else "Offline “Hey Jarvis” detector active (temporary model)"
             )
             detector.start { score ->
-                // Make accidental wake-ups less likely while music is playing.
-                val threshold = if (isMediaActive()) MEDIA_PLAYING_WAKE_THRESHOLD else WAKE_THRESHOLD
-                if (score >= threshold && dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
-                    handleDedicatedWake()
+                // Detector callbacks may arrive on a native worker thread. Serialize all state
+                // transitions on the main thread and require a higher score while media is active
+                // so lyrics/speakers are less likely to trigger the assistant.
+                mainHandler.post {
+                    val threshold = if (isMediaActive()) MEDIA_PLAYING_WAKE_THRESHOLD else WAKE_THRESHOLD
+                    if (score >= threshold && dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
+                        handleDedicatedWake()
+                    }
                 }
             }
             // Avoid silently waiting forever if the detector's audio pipeline is unsupported.
@@ -307,15 +330,46 @@ class WakeWordService : Service() {
         // allowing a background service to open an Activity immediately after the wake phrase.
         awaitingCommand = true
         handlingWake = false
-        updateNotification("Wake phrase heard — say your command")
-        mainHandler.post { startSpeechRecognition() }
+        updateNotification("Wake phrase heard — preparing command capture")
+        acknowledgeAndCaptureCommand()
         mainHandler.postDelayed({
             if (awaitingCommand) {
                 awaitingCommand = false
+                runCatching { recognizer?.cancel() }
+                listening = false
                 updateNotification("No command heard — listening again")
                 startRecognition()
             }
         }, COMMAND_CAPTURE_TIMEOUT_MS)
+    }
+
+    /** Speak a tiny acknowledgement, then start a fresh recognition session after TTS finishes. */
+    private fun acknowledgeAndCaptureCommand() {
+        if (!awaitingCommand) return
+        val engine = wakeTts
+        if (engine == null || !wakeTtsReady) {
+            startSpeechRecognition()
+            return
+        }
+        val utteranceId = "munch-wake-${System.currentTimeMillis()}"
+        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) = Unit
+            override fun onDone(utteranceId: String?) {
+                mainHandler.postDelayed({ if (awaitingCommand) startSpeechRecognition() }, 180L)
+            }
+            override fun onError(utteranceId: String?) {
+                mainHandler.post { if (awaitingCommand) startSpeechRecognition() }
+            }
+        })
+        val result = runCatching {
+            engine.speak("Yes?", TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        }.getOrDefault(TextToSpeech.ERROR)
+        if (result == TextToSpeech.ERROR) {
+            startSpeechRecognition()
+        } else {
+            // Some OEM TTS engines omit onDone; retain a bounded recovery path.
+            mainHandler.postDelayed({ if (awaitingCommand && !listening) startSpeechRecognition() }, ACK_CAPTURE_FALLBACK_MS)
+        }
     }
 
     private fun handlePhrase(phrase: String) {
@@ -346,7 +400,13 @@ class WakeWordService : Service() {
      * allowing an Activity launch from the background immediately after wake detection.
      */
     private fun dispatchCapturedCommand(rawCommand: String) {
-        val command = rawCommand.trim().trimEnd('.', '!', '?')
+        val command = rawCommand.trim()
+            .replace(Regex("(?i)^hey[\\s,]+(?:jarvis|mun?ch)[,\\s:;.!?-]*"), "")
+            .trim().trimEnd('.', '!', '?')
+        if (command.isBlank()) {
+            updateNotification("Wake phrase heard — say your command", listen = true)
+            return
+        }
         val play = Regex("^(?:please\\s+)?play\\s+(.+?)(?:\\s+on\\s+youtube)?$", RegexOption.IGNORE_CASE)
             .matchEntire(command)
         if (play != null && play.groupValues[1].isNotBlank()) {
@@ -428,6 +488,10 @@ class WakeWordService : Service() {
         recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
+        wakeTtsReady = false
+        runCatching { wakeTts?.stop() }
+        runCatching { wakeTts?.shutdown() }
+        wakeTts = null
         runCatching { wakeDetector?.stop() }
         runCatching { wakeDetector?.release() }
         wakeDetector = null
@@ -450,7 +514,11 @@ class WakeWordService : Service() {
         private const val DETECTOR_FALLBACK_DELAY_MS = 20_000L
         private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
-        private const val WAKE_THRESHOLD = 0.55f
-        private const val MEDIA_PLAYING_WAKE_THRESHOLD = 0.70f
+        // Sensitivity is evaluated in our callback; this lower internal threshold is needed
+        // for quieter utterances to reach it at all.
+        private const val DETECTOR_CALLBACK_THRESHOLD = 0.30f
+        private const val WAKE_THRESHOLD = 0.43f
+        private const val MEDIA_PLAYING_WAKE_THRESHOLD = 0.62f
+        private const val ACK_CAPTURE_FALLBACK_MS = 2_000L
     }
 }
