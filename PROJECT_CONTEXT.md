@@ -1,30 +1,53 @@
 # Munch — Persistent Project Instructions
 
 ## Project boundaries
-- Munch is a separate project from Project Samantha. Never mix their code, decisions, or release artifacts.
+- Munch is a standalone project, separate from Project Samantha. Never mix their code, decisions, issues, or release artifacts.
 - Repository: https://github.com/Prav1525/Munch
 - Default branch: main.
 
-## Required development workflow
-- Inspect the current repository and this file before making changes.
-- The user requires code to be compiled and tested before an APK is delivered.
-- Never claim build, test, install, or device-test success unless actually verified.
-- For every meaningful change, build/compile and run available tests; fix failures and rerun relevant checks.
-- If the environment cannot build or test, state the blocker and do not call the app verified.
-- Only provide an APK after a successful build, and clearly state which tests ran and which did not.
-- Update this file after meaningful work with confirmed requirements, decisions, exact commands/results, blockers, and next steps.
+## Product vision
+Munch is an Android voice assistant designed for motorcycle riding, with hands-free interaction as a core goal.
+
+## Agreed initial technical direction
+- Android app using Kotlin and Jetpack Compose.
+- Explore a wake phrase: “Munch”.
+- Support offline voice commands where practical.
+- Music controls through compatible music apps: play, pause, skip, and search/request music.
+- Voice-based destination requests that open Google Maps navigation.
+- Use the user's OnePlus Bluetooth neckband for microphone and audio when connected.
+- Investigate a foreground service for background listening, respecting Android platform restrictions, permissions, battery use, and privacy.
+- Calls and broader general-assistant capabilities are future modules, not claims about existing functionality.
+
+These are agreed goals, not implemented or verified features. Confirm technical feasibility as implementation proceeds; explain platform limits instead of promising unsupported always-on behavior.
+
+## Non-negotiable build, test, and APK rules
+- The user explicitly does not want repeated coding mistakes or an APK delivered without verification.
+- Inspect the current repository, history, and this file before making changes.
+- For every meaningful change, compile/build and run the available tests; fix failures and rerun the relevant checks.
+- Never claim build, test, installation, or device-test success unless actually verified.
+- Only deliver an APK after a successful build. State the exact checks that passed and which checks were not performed.
+- If the available environment cannot build or test, explain the blocker clearly and do not call the app verified or fabricate an APK.
+- Emulator/build checks do not replace real-device tests for microphone input, OnePlus Bluetooth audio, wake-word performance, and motorcycle noise.
+- Track Android permissions, background-service restrictions, and privacy implications.
+
+## Persistent continuity
+- Treat this file as the source of truth for project requirements and handoffs.
+- Do not make the user repeat decisions already recorded here.
+- After meaningful work, update this file with confirmed decisions, files changed, exact build/test commands and outcomes, blockers, and the next step.
+- Separate confirmed facts from plans, assumptions, and untested features.
 
 ## Current status (2026-10-18)
-- Initial inspection reported the repository empty; no Android source or build/test result is confirmed yet.
-- The user requested this persistent context file so future chats can continue without losing project decisions.
-- Previous GitHub write attempts failed with HTTP 403: Resource not accessible by integration. This attempt is to recheck write access.
-- Product purpose and first milestone still need confirmation; do not invent requirements.
+- PROJECT_CONTEXT.md exists on the main branch.
+- The earlier repository inspection reported the repository empty; current Android source/build configuration has not yet been confirmed in this context.
+- No successful Android build, automated test run, APK generation, installation, or real-device verification is confirmed yet.
+- The product direction and initial feature goals above have been recovered from the prior discussion and recorded here.
 
-## Handoff rules
-1. Read this file and inspect the latest repository contents/history before continuing.
-2. Base progress on actual files and verified results, not assumptions.
-3. Before ending a work session, update the progress/status and next step here.
-4. Do not mark work complete without verifying it.
+## Handoff checklist
+1. Fetch this file and inspect the latest repository contents and history.
+2. Identify whether an Android project already exists before initializing anything.
+3. Implement a small, testable first milestone; do not silently expand scope.
+4. Build and test, fix errors, and repeat checks before packaging.
+5. Update this file with verified results and the next concrete step before ending the session.
 
 ## Next step
-Confirm the file exists on GitHub, then confirm Munch's purpose and initial milestone. Initialize the Android project and compile/test it before offering an APK.
+Inspect the current repository contents. If there is no Android project, initialize the Kotlin/Jetpack Compose project with a minimal first milestone, then compile and test it. Do not offer an APK until the build succeeds and the verification status is clearly reported.
