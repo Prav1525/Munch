@@ -333,22 +333,55 @@ object AssistantServices {
         }
     }
 
-    /** Launches an installed launcher activity by its visible app label, e.g. "Spotify". */
+    /** Launches an installed app by its visible label, tolerating common speech variations. */
+    @Suppress("DEPRECATION")
     fun openInstalledApp(context: Context, requestedName: String): Boolean {
-        var requested = requestedName.trim().lowercase(Locale.ROOT)
-        requested = requested.removeSuffix(" application").removeSuffix(" app").trim()
-        if (requested in setOf("youtube music", "yt music", "ytmusic")) return openMusicApp(context)
-        if (requested == "navigation" || requested == "maps") requested = "google maps"
+        val requested = requestedName.trim()
+            .replace(Regex("[.!?,]+$"), "")
+            .replace(Regex("\\s+"), " ")
+            .lowercase(Locale.ROOT)
+            .removeSuffix(" application")
+            .removeSuffix(" app")
+            .trim()
         if (requested.isBlank()) return false
+
+        // Prefer package-based launch for common apps because spoken names and launcher labels vary.
+        when (requested) {
+            "youtube", "you tube", "yt" -> return openExternalApp(context, "youtube")
+            "youtube music", "you tube music", "yt music", "ytmusic" -> return openMusicApp(context)
+            "maps", "google maps", "navigation", "google map" -> {
+                val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                val launch = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.maps")
+                if (launch != null && runCatching {
+                        context.startActivity(launch.addFlags(flags)); true
+                    }.getOrDefault(false)) return true
+                return runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps"))
+                        .addFlags(flags))
+                    true
+                }.getOrDefault(false)
+            }
+            "chrome", "google chrome" -> {
+                val launch = context.packageManager.getLaunchIntentForPackage("com.android.chrome")
+                if (launch != null && runCatching {
+                        context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+                    }.getOrDefault(false)) return true
+            }
+        }
+
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val matches = runCatching { context.packageManager.queryIntentActivities(launcherIntent, 0) }.getOrDefault(emptyList())
-        val target = matches.firstOrNull {
-            it.loadLabel(context.packageManager).toString().trim().lowercase(Locale.ROOT) == requested
-        } ?: matches.firstOrNull {
-            val label = it.loadLabel(context.packageManager).toString().trim().lowercase(Locale.ROOT)
-            label.startsWith(requested) || (requested.length >= 4 && label.contains(requested))
-        } ?: return false
-        val launch = context.packageManager.getLaunchIntentForPackage(target.activityInfo.packageName) ?: return false
+        val matches = runCatching {
+            context.packageManager.queryIntentActivities(launcherIntent, 0)
+        }.getOrDefault(emptyList())
+        val target = matches
+            .map { info -> info to AppNameMatcher.score(
+                info.loadLabel(context.packageManager).toString(), requested
+            ) }
+            .filter { (_, score) -> score > 0 }
+            .maxByOrNull { (_, score) -> score }
+            ?.first ?: return false
+        val launch = context.packageManager.getLaunchIntentForPackage(target.activityInfo.packageName)
+            ?: return false
         return runCatching {
             context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             true
