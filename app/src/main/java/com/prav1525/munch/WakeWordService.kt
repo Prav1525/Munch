@@ -34,6 +34,7 @@ class WakeWordService : Service() {
     private var wakeDetector: OpenWakeWord? = null
     private var listening = false
     private var dedicatedDetectorActive = false
+    private var forceSpeechFallback = false
     private var handlingWake = false
     private var mediaSession: MediaSessionCompat? = null
 
@@ -93,6 +94,11 @@ class WakeWordService : Service() {
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
 
+        if (forceSpeechFallback) {
+            startSpeechRecognition()
+            return
+        }
+
         try {
             recognizer?.cancel()
             recognizer?.destroy()
@@ -117,6 +123,18 @@ class WakeWordService : Service() {
                     handleDedicatedWake()
                 }
             }
+            // Avoid silently waiting forever if the detector's audio pipeline is unsupported.
+            mainHandler.postDelayed({
+                if (dedicatedDetectorActive && !handlingWake) {
+                    dedicatedDetectorActive = false
+                    forceSpeechFallback = true
+                    runCatching { wakeDetector?.stop() }
+                    runCatching { wakeDetector?.release() }
+                    wakeDetector = null
+                    updateNotification("Using speech fallback — say Hey Jarvis")
+                    startSpeechRecognition()
+                }
+            }, DETECTOR_FALLBACK_DELAY_MS)
             return
         } catch (_: Exception) {
             dedicatedDetectorActive = false
@@ -157,7 +175,7 @@ class WakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             }
             listening = true
-            updateNotification("Speech fallback listening for “Hey Munch”")
+            updateNotification("Speech fallback listening for “Hey Jarvis” or “Hey Munch”")
             recognizer?.startListening(intent)
         } catch (_: Exception) {
             listening = false
@@ -184,7 +202,7 @@ class WakeWordService : Service() {
             // Speech engines return alternatives; don't discard a valid wake phrase just because
             // the first transcript was wrong.
             val phrase = phrases.firstOrNull {
-                Regex("\\bhey[\\s,]+mun?ch\\b", RegexOption.IGNORE_CASE).containsMatchIn(it)
+                wakePhraseRegex().containsMatchIn(it)
             } ?: phrases.firstOrNull().orEmpty()
             handlePhrase(phrase.trim())
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
@@ -196,7 +214,7 @@ class WakeWordService : Service() {
             // If the wake phrase and a complete command are already present in a partial
             // transcript, hand it off immediately rather than waiting for end-of-speech.
             val candidate = phrases.firstOrNull {
-                val match = Regex(".*?\\bhey[\\s,]+mun?ch\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE)
+                val match = Regex(".*?\\bhey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE)
                     .matchEntire(it)
                 match != null && match.groupValues.getOrElse(1) { "" }.trim().length >= 2
             }
@@ -225,14 +243,14 @@ class WakeWordService : Service() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra("munch_wake_listen", true)
         }
-        updateNotification("Heard “Hey Munch” — tap to continue", listen = true)
+        updateNotification("Wake phrase heard — tap to continue", listen = true)
         runCatching { startActivity(launch) }
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
         mainHandler.postDelayed({ startRecognition() }, 12_000)
     }
 
     private fun handlePhrase(phrase: String) {
-        val match = Regex(".*?\\bhey[\\s,]+mun?ch\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
+        val match = Regex(".*?\\bhey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
             ?: return
         if (handlingWake) return
         handlingWake = true
@@ -244,7 +262,7 @@ class WakeWordService : Service() {
         }
         // Android can block activity launches from background services on some versions.
         // The persistent notification remains tappable as a reliable fallback.
-        updateNotification("Heard “Hey Munch” — tap to continue", command, command.isBlank())
+        updateNotification("Wake phrase heard — tap to continue", command, command.isBlank())
         runCatching { startActivity(launch) }
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
         // Cancellation can suppress the normal onResults callback, so schedule recovery here too.
@@ -318,9 +336,11 @@ class WakeWordService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private fun wakePhraseRegex() = Regex("\\bhey[\\s,]+(?:jarvis|mun?ch)\\b", RegexOption.IGNORE_CASE)
         private const val CHANNEL_ID = "munch_wake_listener"
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
+        private const val DETECTOR_FALLBACK_DELAY_MS = 20_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
         private const val WAKE_THRESHOLD = 0.55f
     }
