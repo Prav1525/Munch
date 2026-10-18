@@ -417,6 +417,17 @@ class WakeWordService : Service() {
             updateNotification("Wake phrase heard — say your command", listen = true)
             return
         }
+        if (VoiceCommandParser.isMusicAppCommand(command)) {
+            val opened = AssistantServices.openMusicAndResume(this)
+            updateNotification(
+                if (opened) "YouTube Music opened — resume requested, playback not confirmed"
+                else "Couldn't open YouTube Music"
+            )
+            awaitingCommand = false
+            handlingWake = false
+            mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+            return
+        }
         val query = VoiceCommandParser.youtubePlayQuery(command)
         if (query != null) {
             updateNotification("Finding YouTube playback for $query…")
