@@ -125,7 +125,7 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(text: String = "Listening for “Hey Munch”"): Notification {
         val openApp = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -134,7 +134,7 @@ class WakeWordService : Service() {
             Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("Munch hands-free")
-                .setContentText("Listening for “Hey Munch”")
+                .setContentText(text)
                 .setContentIntent(openApp)
                 .setOngoing(true)
                 .build()
@@ -152,11 +152,7 @@ class WakeWordService : Service() {
 
     private fun updateNotification(text: String) {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification().also {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Notification content is recreated by buildNotification; the channel stays low-noise.
-            }
-        })
+        manager.notify(NOTIFICATION_ID, buildNotification(text))
     }
 
     override fun onDestroy() {
