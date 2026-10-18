@@ -758,14 +758,6 @@ private fun runAssistantRequest(
                 setStatus(answer); activity.speak(answer)
             }
         }
-            val query = Regex("^play\\s+(.+?)\\s+on\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE)
-                .matchEntire(prompt.trim())!!.groupValues[1].trim()
-            val opened = AssistantServices.searchSpotify(context, query)
-            val answer = if (opened) "Opening Spotify search for $query. Choose a result to start playback; next, previous, pause and resume use Android media controls."
-                else "I couldn't open Spotify. Check that it is installed or that your browser can open Spotify."
-            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
-            setStatus(answer); activity.speak(answer)
-        }
         Regex("^(?:open|launch|start)\\s+spotify[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val opened = AssistantServices.openSpotify(context)
             val answer = if (opened) "Opening Spotify." else "I couldn't open Spotify."
