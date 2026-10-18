@@ -184,8 +184,12 @@ class WakeWordService : Service() {
     }
 
     private val listener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: android.os.Bundle?) = Unit
-        override fun onBeginningOfSpeech() = Unit
+        override fun onReadyForSpeech(params: android.os.Bundle?) {
+            updateNotification("Speech fallback ready — say Hey Jarvis or Hey Munch")
+        }
+        override fun onBeginningOfSpeech() {
+            updateNotification("Speech detected — listening for Hey Jarvis or Hey Munch")
+        }
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
         override fun onEndOfSpeech() {
@@ -194,6 +198,19 @@ class WakeWordService : Service() {
         }
         override fun onError(error: Int) {
             listening = false
+            val reason = when (error) {
+                SpeechRecognizer.ERROR_AUDIO -> "audio capture error"
+                SpeechRecognizer.ERROR_CLIENT -> "recognizer client reset"
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "microphone permission missing"
+                SpeechRecognizer.ERROR_NETWORK -> "speech service network error"
+                SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "speech service timed out"
+                SpeechRecognizer.ERROR_NO_MATCH -> "no speech match — retrying"
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "speech service busy"
+                SpeechRecognizer.ERROR_SERVER -> "speech service error"
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "no speech detected — retrying"
+                else -> "speech error $error"
+            }
+            updateNotification("Speech fallback: $reason")
             mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
         }
         override fun onResults(results: android.os.Bundle?) {
@@ -201,10 +218,15 @@ class WakeWordService : Service() {
             val phrases = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
             // Speech engines return alternatives; don't discard a valid wake phrase just because
             // the first transcript was wrong.
-            val phrase = phrases.firstOrNull {
-                wakePhraseRegex().containsMatchIn(it)
-            } ?: phrases.firstOrNull().orEmpty()
-            handlePhrase(phrase.trim())
+            val wakePhrase = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
+            if (wakePhrase != null) {
+                handlePhrase(wakePhrase.trim())
+            } else {
+                updateNotification(
+                    if (phrases.isEmpty()) "Speech fallback heard no words — retrying"
+                    else "Speech heard but wake phrase not matched — say Hey Jarvis"
+                )
+            }
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
         }
         override fun onPartialResults(partialResults: android.os.Bundle?) {
@@ -213,11 +235,9 @@ class WakeWordService : Service() {
                 .orEmpty()
             // If the wake phrase and a complete command are already present in a partial
             // transcript, hand it off immediately rather than waiting for end-of-speech.
-            val candidate = phrases.firstOrNull {
-                val match = Regex(".*?\\bhey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE)
-                    .matchEntire(it)
-                match != null && match.groupValues.getOrElse(1) { "" }.trim().length >= 2
-            }
+            // Wake on the phrase alone too; the Activity then opens normal command capture.
+            // This avoids requiring the user to say the command in the same recognition window.
+            val candidate = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
             if (candidate != null) handlePhrase(candidate.trim())
         }
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
