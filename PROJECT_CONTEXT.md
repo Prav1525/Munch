@@ -120,3 +120,11 @@
 - Commit: `5d1b991270b6d594f63939942e29b6b120962d41`.
 - GitHub Actions run 112 passed `gradle --no-daemon testDebugUnitTest assembleDebug` and uploaded artifact `munch-debug-apk`. APK size: 79,730,563 bytes; SHA-256: `96110b19c1d5b47e3e1968f69029380858cff2dd07991f1b94ef26830502f93e`. Artifact ZIP integrity check passed.
 - This is a code/build fix, not a physical-device confirmation. Still required on the user's phone: test wake listening with screen on/off, verify whether error 11/13 no longer repeats, test the headset button, and test YouTube Music with and without an existing queue. The built-in “Hey Jarvis” model is still the temporary detector until a compatible custom `hey_munch.onnx` model is bundled.
+
+
+## YouTube voice autoplay attempt (2026-10-18)
+- Branch: `fix/youtube-voice-autoplay`; pull request: https://github.com/Prav1525/Munch/pull/2.
+- Added `AssistantServices.playYouTubeSearch`: resolves a YouTube search page to a video ID off the main thread, then opens the direct watch URL in the YouTube app where available. If the search page cannot be resolved, it falls back to the search URL and reports that autoplay could not be confirmed.
+- Generic `play <query>`, `play <query> on YouTube`, and `open YouTube and play <query>` route through this flow. A request ending in “song/songs” is expanded to a Tamil movie soundtrack/full-album search, so “play Jailer song” looks for Jailer Tamil movie songs.
+- GitHub Actions run 116 for source commit `bb80cfdf52ecd05d48394089c0d20eb4e01b10ec` passed `testDebugUnitTest assembleDebug` and uploaded the `munch-debug-apk` artifact: https://github.com/Prav1525/Munch/actions/runs/39128854555.
+- This is not yet physical-device verified. YouTube can change its HTML/search markup; if no video ID can be resolved, the fallback opens results and will not autoplay. Even a direct watch URL can be affected by YouTube sign-in, network, app, or playback restrictions. Test “Hey Munch, play Jailer song” on the phone before claiming reliable playback. No APK should be described as device-verified.

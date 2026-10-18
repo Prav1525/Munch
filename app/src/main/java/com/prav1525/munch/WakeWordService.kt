@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.media.AudioManager
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
@@ -123,7 +124,9 @@ class WakeWordService : Service() {
                 else "Offline “Hey Jarvis” detector active (temporary model)"
             )
             detector.start { score ->
-                if (score >= WAKE_THRESHOLD && dedicatedDetectorActive && !handlingWake) {
+                // Make accidental wake-ups less likely while music is playing.
+                val threshold = if (isMediaActive()) MEDIA_PLAYING_WAKE_THRESHOLD else WAKE_THRESHOLD
+                if (score >= threshold && dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
                     handleDedicatedWake()
                 }
             }
@@ -252,21 +255,21 @@ class WakeWordService : Service() {
                 awaitingCommand = false
                 val command = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
                 if (command.isNotBlank()) {
-                    val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        putExtra("munch_wake_command", command)
-                    }
-                    updateNotification("Command heard — tap to run", command)
-                    runCatching { startActivity(launch) }
+                    dispatchCapturedCommand(command)
                 } else {
                     updateNotification("No command heard — listening again")
                 }
                 mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
                 return
             }
-            // Speech engines return alternatives; don't discard a valid wake phrase just because
-            // the first transcript was wrong.
-            val wakePhrase = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
+            // Speech fallback can transcribe music lyrics. Require the wake phrase at the
+            // beginning of the final transcript, and use confidence when the provider supplies it.
+            val wakeIndex = phrases.indexOfFirst { wakePhraseStartRegex().containsMatchIn(it) }
+            val scores = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+            val confidentEnough = wakeIndex >= 0 &&
+                (scores == null || wakeIndex >= scores.size || scores[wakeIndex] < 0f ||
+                    scores[wakeIndex] >= FALLBACK_WAKE_CONFIDENCE)
+            val wakePhrase = if (confidentEnough) phrases[wakeIndex] else null
             if (wakePhrase != null) {
                 handlePhrase(wakePhrase.trim())
             } else {
@@ -278,16 +281,8 @@ class WakeWordService : Service() {
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
         }
         override fun onPartialResults(partialResults: android.os.Bundle?) {
-            if (awaitingCommand) return
-            val phrases = partialResults
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                .orEmpty()
-            // If the wake phrase and a complete command are already present in a partial
-            // transcript, hand it off immediately rather than waiting for end-of-speech.
-            // Wake on the phrase alone too; the Activity then opens normal command capture.
-            // This avoids requiring the user to say the command in the same recognition window.
-            val candidate = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
-            if (candidate != null) handlePhrase(candidate.trim())
+            // Partial transcripts often mistake music lyrics for wake phrases. Wait for final
+            // recognition and apply the stricter wake-prefix/confidence checks there.
         }
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
     }
@@ -329,18 +324,55 @@ class WakeWordService : Service() {
         if (handlingWake) return
         handlingWake = true
         val command = match.groupValues.getOrElse(1) { "" }.trim().trim(',', '.', '!', '?')
-        val launch = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            if (command.isNotBlank()) putExtra("munch_wake_command", command)
-            else putExtra("munch_wake_listen", true)
+        if (command.isNotBlank()) {
+            dispatchCapturedCommand(command)
+        } else {
+            val launch = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                putExtra("munch_wake_listen", true)
+            }
+            updateNotification("Wake phrase heard — say your command", listen = true)
+            runCatching { startActivity(launch) }
         }
-        // Android can block activity launches from background services on some versions.
-        // The persistent notification remains tappable as a reliable fallback.
-        updateNotification("Wake phrase heard — tap to continue", command, command.isBlank())
-        runCatching { startActivity(launch) }
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
-        // Cancellation can suppress the normal onResults callback, so schedule recovery here too.
         mainHandler.postDelayed({ startRecognition() }, 12_000)
+    }
+
+    private fun isMediaActive(): Boolean =
+        runCatching { (getSystemService(AUDIO_SERVICE) as AudioManager).isMusicActive }.getOrDefault(false)
+
+    /**
+     * Run common play requests in the foreground service. This avoids depending on Android
+     * allowing an Activity launch from the background immediately after wake detection.
+     */
+    private fun dispatchCapturedCommand(rawCommand: String) {
+        val command = rawCommand.trim().trimEnd('.', '!', '?')
+        val play = Regex("^(?:please\\s+)?play\\s+(.+?)(?:\\s+on\\s+youtube)?$", RegexOption.IGNORE_CASE)
+            .matchEntire(command)
+        if (play != null && play.groupValues[1].isNotBlank()) {
+            val query = play.groupValues[1].trim()
+            updateNotification("Finding YouTube playback for $query…")
+            AssistantServices.playYouTubeSearch(this, query) { opened, autoPlay ->
+                updateNotification(
+                    when {
+                        !opened -> "Couldn't open YouTube for $query"
+                        autoPlay -> "Opened video for $query"
+                        else -> "YouTube opened; automatic playback not confirmed"
+                    }
+                )
+                awaitingCommand = false
+                handlingWake = false
+                mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
+            }
+            return
+        }
+        val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("munch_wake_command", command)
+        }
+        updateNotification("Command heard — opening Munch", command)
+        val opened = runCatching { startActivity(launch); true }.getOrDefault(false)
+        if (!opened) updateNotification("Command heard — tap notification to run", command)
     }
 
     private fun createNotificationChannel() {
@@ -410,7 +442,8 @@ class WakeWordService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private fun wakePhraseRegex() = Regex("\\bhey[\\s,]+(?:jarvis|mun?ch)\\b", RegexOption.IGNORE_CASE)
+        private fun wakePhraseStartRegex() = Regex("^\\s*hey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)$", RegexOption.IGNORE_CASE)
+        private const val FALLBACK_WAKE_CONFIDENCE = 0.65f
         private const val CHANNEL_ID = "munch_wake_listener"
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
@@ -418,5 +451,6 @@ class WakeWordService : Service() {
         private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
         private const val WAKE_THRESHOLD = 0.55f
+        private const val MEDIA_PLAYING_WAKE_THRESHOLD = 0.70f
     }
 }

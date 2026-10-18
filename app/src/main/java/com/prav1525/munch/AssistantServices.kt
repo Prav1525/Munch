@@ -422,7 +422,90 @@ object AssistantServices {
         }.getOrDefault(false)
     }
 
-    /** Opens YouTube search results for a spoken title; Android/YouTube may require a tap to start playback. */
+    /**
+     * Resolve a real YouTube video from search results and open the watch URL directly.
+     * YouTube can change its HTML or require user interaction; failures fall back to search.
+     */
+    fun playYouTubeSearch(context: Context, query: String, callback: (opened: Boolean, autoPlayRequested: Boolean) -> Unit) {
+        val clean = query.trim()
+        if (clean.isBlank()) {
+            callback(openExternalApp(context, "youtube"), false)
+            return
+        }
+
+        val searchText = when {
+            clean.matches(Regex("(?i).+\\s+movie\\s+songs?")) -> clean
+            clean.matches(Regex("(?i).+\\s+songs?")) ->
+                clean.replace(Regex("(?i)\\s+songs?$"), "").trim() + " Tamil movie songs full album"
+            else -> clean
+        }
+
+        io.execute {
+            val videoId = runCatching {
+                val url = URL("https://www.youtube.com/results?search_query=" + Uri.encode(searchText))
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 4500
+                    readTimeout = 6000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36")
+                    setRequestProperty("Accept-Language", "en-IN,en;q=0.9,ta;q=0.8")
+                    setRequestProperty("Accept", "text/html,application/xhtml+xml")
+                }
+                try {
+                    if (connection.responseCode !in 200..299) null
+                    else {
+                        // Bound memory use and tolerate whitespace/format changes in YouTube's JSON.
+                        val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                            val out = StringBuilder()
+                            val buffer = CharArray(8192)
+                            var total = 0
+                            while (total < 2_000_000) {
+                                val count = reader.read(buffer, 0, minOf(buffer.size, 2_000_000 - total))
+                                if (count < 0) break
+                                out.append(buffer, 0, count)
+                                total += count
+                            }
+                            out.toString()
+                        }
+                        val rendererId = Regex(
+                            """"videoRenderer"\s*:\s*\{[\s\S]{0,16000}?"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
+                        ).find(html)?.groupValues?.getOrNull(1)
+                        rendererId ?: Regex(
+                            """"videoId"\s*:\s*"([A-Za-z0-9_-]{11})""""
+                        ).find(html)?.groupValues?.getOrNull(1)
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }.getOrNull()
+
+            Handler(Looper.getMainLooper()).post {
+                val flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                val intents = if (!videoId.isNullOrBlank()) {
+                    listOf(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId"))
+                            .setPackage("com.google.android.youtube").addFlags(flags),
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
+                            .setPackage("com.google.android.youtube").addFlags(flags),
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$videoId"))
+                            .addFlags(flags)
+                    )
+                } else {
+                    val searchUri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(searchText))
+                    listOf(
+                        Intent(Intent.ACTION_VIEW, searchUri).setPackage("com.google.android.youtube").addFlags(flags),
+                        Intent(Intent.ACTION_VIEW, searchUri).addFlags(flags)
+                    )
+                }
+                val opened = intents.any { intent ->
+                    runCatching { context.startActivity(intent); true }.getOrDefault(false)
+                }
+                callback(opened, opened && !videoId.isNullOrBlank())
+            }
+        }
+    }
+
     fun searchYouTube(context: Context, query: String): Boolean {
         val clean = query.trim()
         if (clean.isBlank()) return openExternalApp(context, "youtube")
