@@ -21,7 +21,14 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.content.pm.ServiceInfo
-import com.openwakeword.OpenWakeWord
+import com.suxsem.androidwakeword.WakeWordDetector
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
@@ -34,7 +41,9 @@ import java.util.Locale
 class WakeWordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
-    private var wakeDetector: OpenWakeWord? = null
+    private var wakeDetector: WakeWordDetector? = null
+    private val detectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var detectorJob: Job? = null
     private var listening = false
     private var dedicatedDetectorActive = false
     private var forceSpeechFallback = false
@@ -125,55 +134,68 @@ class WakeWordService : Service() {
             recognizer?.destroy()
             recognizer = null
             val customModelAvailable = hasCustomWakeModel()
-            // Let the detector report lower scores; apply the media-aware threshold ourselves.
-            // This avoids the library's fixed threshold preventing the more sensitive quiet-room
-            // setting from ever being observed by the callback.
-            val builder = OpenWakeWord.Builder(this)
-                .setThreshold(DETECTOR_CALLBACK_THRESHOLD)
-                .setDebounceMs(2_200L)
-            val detector = if (customModelAvailable) {
-                builder.setModelAsset(CUSTOM_MODEL_ASSET).build()
+            // Suxsem's offline pipeline adds Speex + Silero VAD and Android hardware
+            // NoiseSuppressor/AutomaticGainControl where the device supports them.
+            // The existing openWakeWord classifier remains compatible with its input shape.
+            val classifierAsset = if (customModelAvailable) {
+                CUSTOM_MODEL_ASSET
             } else {
-                builder.setModel(OpenWakeWord.BuiltInModel.HEY_JARVIS).build()
+                "openwakeword/hey_jarvis_v0.1.onnx"
             }
+            val detector = WakeWordDetector(
+                context = applicationContext,
+                modelFile = classifierAsset,
+                verifierFile = null,
+                minScore = DETECTOR_CALLBACK_THRESHOLD,
+                minVerifierScore = 0f,
+                onDetected = { score ->
+                    mainHandler.post {
+                        val threshold = if (isMediaActive()) MEDIA_PLAYING_WAKE_THRESHOLD else WAKE_THRESHOLD
+                        if (score >= threshold && dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
+                            handleDedicatedWake()
+                        }
+                    }
+                }
+            )
             wakeDetector = detector
             dedicatedDetectorActive = true
             updateNotification(
-                if (customModelAvailable) "Offline “Hey Munch” detector active"
-                else "Offline “Hey Jarvis” detector active (temporary model)"
+                if (customModelAvailable) "Offline “Hey Munch” with noise filtering active"
+                else "Offline “Hey Jarvis” with noise filtering active"
             )
-            detector.start { score ->
-                // Detector callbacks may arrive on a native worker thread. Serialize all state
-                // transitions on the main thread and require a higher score while media is active
-                // so lyrics/speakers are less likely to trigger the assistant.
-                mainHandler.post {
-                    val threshold = if (isMediaActive()) MEDIA_PLAYING_WAKE_THRESHOLD else WAKE_THRESHOLD
-                    if (score >= threshold && dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
-                        handleDedicatedWake()
+            detectorJob = detectorScope.launch {
+                try {
+                    detector.startDetection()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    mainHandler.post {
+                        if (dedicatedDetectorActive && !isDestroyed) {
+                            dedicatedDetectorActive = false
+                            forceSpeechFallback = true
+                            stopWakeDetector()
+                            updateNotification("Wake detector failed — using speech fallback")
+                            startSpeechRecognition()
+                        }
                     }
                 }
             }
-            // Avoid silently waiting forever if the detector's audio pipeline is unsupported.
-            mainHandler.postDelayed({
-                if (dedicatedDetectorActive && !handlingWake) {
-                    dedicatedDetectorActive = false
-                    forceSpeechFallback = true
-                    runCatching { wakeDetector?.stop() }
-                    runCatching { wakeDetector?.release() }
-                    wakeDetector = null
-                    updateNotification("Using speech fallback — say Hey Jarvis")
-                    startSpeechRecognition()
-                }
-            }, DETECTOR_FALLBACK_DELAY_MS)
             return
         } catch (_: Exception) {
             dedicatedDetectorActive = false
-            runCatching { wakeDetector?.release() }
-            wakeDetector = null
+            stopWakeDetector()
             updateNotification("Wake detector unavailable — using speech fallback")
         }
 
         startSpeechRecognition()
+    }
+
+    private fun stopWakeDetector() {
+        detectorJob?.cancel()
+        detectorJob = null
+        runCatching { wakeDetector?.pauseDetection() }
+        runCatching { wakeDetector?.releaseResources() }
+        wakeDetector = null
     }
 
     private fun hasCustomWakeModel(): Boolean =
@@ -326,9 +348,8 @@ class WakeWordService : Service() {
     private fun handleDedicatedWake() {
         if (handlingWake || awaitingCommand) return
         dedicatedDetectorActive = false
-        runCatching { wakeDetector?.stop() }
-        runCatching { wakeDetector?.release() }
-        wakeDetector = null
+        stopWakeDetector()
+        detectorScope.cancel()
         // Capture the command in the foreground service instead of relying on Android
         // allowing a background service to open an Activity immediately after the wake phrase.
         awaitingCommand = true
