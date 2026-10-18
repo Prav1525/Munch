@@ -95,7 +95,7 @@ class WakeWordService : Service() {
             // Speech engines return alternatives; don't discard a valid wake phrase just because
             // the first transcript was wrong.
             val phrase = phrases.firstOrNull {
-                Regex("\\bhey[\\s,]+munch\\b", RegexOption.IGNORE_CASE).containsMatchIn(it)
+                Regex("\\bhey[\\s,]+mun?ch\\b", RegexOption.IGNORE_CASE).containsMatchIn(it)
             } ?: phrases.firstOrNull().orEmpty()
             handlePhrase(phrase.trim())
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
@@ -105,7 +105,7 @@ class WakeWordService : Service() {
     }
 
     private fun handlePhrase(phrase: String) {
-        val match = Regex(".*?\\bhey[\\s,]+munch\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
+        val match = Regex(".*?\\bhey[\\s,]+mun?ch\\b[,:;.!? ]*(.*)", RegexOption.IGNORE_CASE).matchEntire(phrase)
             ?: return
         if (handlingWake) return
         handlingWake = true
@@ -117,7 +117,7 @@ class WakeWordService : Service() {
         }
         // Android can block activity launches from background services on some versions.
         // The persistent notification remains tappable as a reliable fallback.
-        updateNotification("Heard “Hey Munch” — tap to open Munch")
+        updateNotification("Heard “Hey Munch” — tap to continue", command, command.isBlank())
         runCatching { startActivity(launch) }
         mainHandler.postDelayed({ handlingWake = false }, 10_000)
     }
@@ -131,9 +131,17 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun buildNotification(text: String = "Listening for “Hey Munch”"): Notification {
+    private fun buildNotification(
+        text: String = "Listening for “Hey Munch”",
+        command: String? = null,
+        listen: Boolean = false
+    ): Notification {
+        val openIntent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        if (!command.isNullOrBlank()) openIntent.putExtra("munch_wake_command", command)
+        else if (listen) openIntent.putExtra("munch_wake_listen", true)
         val openApp = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
+            this, 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -156,9 +164,9 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun updateNotification(text: String) {
+    private fun updateNotification(text: String, command: String? = null, listen: Boolean = false) {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(text))
+        manager.notify(NOTIFICATION_ID, buildNotification(text, command, listen))
     }
 
     override fun onDestroy() {
