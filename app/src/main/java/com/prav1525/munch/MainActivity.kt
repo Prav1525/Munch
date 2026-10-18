@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.KeyEvent
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
@@ -44,6 +45,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -72,6 +74,25 @@ private val Hairline = Color(0xFF283143)
 
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
+    private var pushToTalkHandler: (() -> Unit)? = null
+
+    fun setPushToTalkHandler(handler: (() -> Unit)?) {
+        pushToTalkHandler = handler
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val isTalkKey = event.keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
+            event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+            event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY
+        if (isTalkKey && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            val handler = pushToTalkHandler
+            if (handler != null) {
+                handler.invoke()
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
     private var selectedVoiceName: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -201,6 +222,17 @@ private fun MunchHome(activity: MainActivity) {
         } else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
+    // Headset/media buttons provide a hands-free push-to-talk fallback when Munch is open.
+    androidx.compose.runtime.SideEffect {
+        activity.setPushToTalkHandler {
+            showConversation = true
+            beginVoice()
+        }
+    }
+    DisposableEffect(activity) {
+        onDispose { activity.setPushToTalkHandler(null) }
+    }
+
     val wakeCommand = activity.intent.getStringExtra("munch_wake_command")
     val wakeListenOnly = activity.intent.getBooleanExtra("munch_wake_listen", false)
     LaunchedEffect(wakeCommand, wakeListenOnly) {
@@ -270,9 +302,10 @@ private fun MunchHome(activity: MainActivity) {
                 Text("WHAT'S ON YOUR MIND?", color = Soft, fontSize = 10.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.SemiBold)
                 Button(onClick = { showConversation = true; beginVoice() }, modifier = Modifier.fillMaxWidth().height(58.dp),
                     shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Void)) {
-                    Text(if (busy) "◌  Thinking…" else "✳   Start a conversation", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (busy) "◌  Thinking…" else "✳   Push to talk · Start conversation", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Text(statusText, color = Cyan, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("Tip: tap the button, or press your headset’s call/play button while Munch is open.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
