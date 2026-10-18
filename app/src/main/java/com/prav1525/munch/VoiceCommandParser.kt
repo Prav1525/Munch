@@ -1,5 +1,7 @@
 package com.prav1525.munch
 
+import java.util.Locale
+
 /**
  * Pure parsing for hands-free voice commands. Kept separate from Android services so
  * wake-prefix handling and common media intents can be covered by fast unit tests.
@@ -27,7 +29,7 @@ object VoiceCommandParser {
     /** Recognizes app-level music commands separately from requests for a specific track. */
     fun isMusicAppCommand(raw: String): Boolean {
         val command = stripWakePhrase(raw)
-            .lowercase()
+            .lowercase(Locale.ROOT)
             .replace(Regex("[.!?]+$"), "")
             .trim()
         return command in setOf(
