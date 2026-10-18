@@ -56,7 +56,9 @@ class WakeWordService : Service() {
                     return when (event.keyCode) {
                         KeyEvent.KEYCODE_HEADSETHOOK,
                         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                        KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                        KeyEvent.KEYCODE_MEDIA_PLAY,
+                        KeyEvent.KEYCODE_MEDIA_NEXT,
+                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
                             launchVoiceFromNeckband()
                             true
                         }
@@ -248,8 +250,9 @@ class WakeWordService : Service() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra("munch_wake_listen", true)
         }
-        updateNotification("Neckband button pressed — tap to talk", listen = true)
-        runCatching { startActivity(launch) }
+        updateNotification("Headset button detected — opening voice input", listen = true)
+        val opened = runCatching { startActivity(launch); true }.getOrDefault(false)
+        if (!opened) updateNotification("Headset button detected — tap notification to talk", listen = true)
     }
 
     private fun handleDedicatedWake() {
