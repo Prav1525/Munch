@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.media.AudioManager
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
@@ -18,17 +17,8 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import android.content.pm.ServiceInfo
-import com.suxsem.androidwakeword.WakeWordDetector
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import com.openwakeword.OpenWakeWord
 import java.util.Locale
 
 /**
@@ -41,10 +31,7 @@ import java.util.Locale
 class WakeWordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
-    private var wakeDetector: WakeWordDetector? = null
-    private val detectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var detectorJob: Job? = null
-    private var detectorPaused = false
+    private var wakeDetector: OpenWakeWord? = null
     private var listening = false
     private var dedicatedDetectorActive = false
     private var forceSpeechFallback = false
@@ -52,24 +39,10 @@ class WakeWordService : Service() {
     private var handlingWake = false
     private var awaitingCommand = false
     private var mediaSession: MediaSessionCompat? = null
-    private var wakeTts: TextToSpeech? = null
-    @Volatile private var wakeTtsReady = false
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // A short spoken acknowledgement makes a wake event observable instead of silently
-        // switching microphone modes. Command capture starts after the acknowledgement ends.
-        wakeTts = TextToSpeech(applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                val engine = wakeTts
-                if (engine != null) {
-                    val languageResult = engine.setLanguage(Locale.US)
-                    wakeTtsReady = languageResult != TextToSpeech.LANG_MISSING_DATA &&
-                        languageResult != TextToSpeech.LANG_NOT_SUPPORTED
-                }
-            }
-        }
         // Keep a media session active while the user-enabled foreground listener runs so
         // Bluetooth/headset media buttons can reach Munch even when its Activity is hidden.
         mediaSession = MediaSessionCompat(this, "MunchNeckband").apply {
@@ -130,111 +103,51 @@ class WakeWordService : Service() {
             return
         }
 
-        // Reuse the initialized ONNX sessions after a wake event. Releasing the detector
-        // on every command would unnecessarily reload several models and may close ORT state.
-        if (wakeDetector != null) {
-            startExistingWakeDetector()
-            return
-        }
-
         try {
             recognizer?.cancel()
             recognizer?.destroy()
             recognizer = null
             val customModelAvailable = hasCustomWakeModel()
-            // Suxsem's offline pipeline adds Speex + Silero VAD and Android hardware
-            // NoiseSuppressor/AutomaticGainControl where the device supports them.
-            // The existing openWakeWord classifier remains compatible with its input shape.
-            val classifierAsset = if (customModelAvailable) {
-                CUSTOM_MODEL_ASSET
+            val builder = OpenWakeWord.Builder(this)
+                .setThreshold(WAKE_THRESHOLD)
+                .setDebounceMs(3_000L)
+            val detector = if (customModelAvailable) {
+                builder.setModelAsset(CUSTOM_MODEL_ASSET).build()
             } else {
-                "hey_jarvis_v0.1.onnx"
+                builder.setModel(OpenWakeWord.BuiltInModel.HEY_JARVIS).build()
             }
-            val detector = WakeWordDetector(
-                context = applicationContext,
-                modelFile = classifierAsset,
-                verifierFile = null,
-                minScore = DETECTOR_CALLBACK_THRESHOLD,
-                minVerifierScore = 0f,
-                onDetected = { score ->
-                    mainHandler.post {
-                        val threshold = if (isMediaActive()) MEDIA_PLAYING_WAKE_THRESHOLD else WAKE_THRESHOLD
-                        if (score >= threshold && dedicatedDetectorActive && !handlingWake && !awaitingCommand) {
-                            handleDedicatedWake()
-                        }
-                    }
-                }
-            )
             wakeDetector = detector
             dedicatedDetectorActive = true
             updateNotification(
-                if (customModelAvailable) "Offline “Hey Munch” with noise filtering active"
-                else "Offline “Hey Jarvis” with noise filtering active"
+                if (customModelAvailable) "Offline “Hey Munch” detector active"
+                else "Offline “Hey Jarvis” detector active (temporary model)"
             )
-            detectorJob = detectorScope.launch {
-                try {
-                    detector.startDetection()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (failure: Exception) {
-                    mainHandler.post {
-                        if (dedicatedDetectorActive) {
-                            dedicatedDetectorActive = false
-                            forceSpeechFallback = true
-                            stopWakeDetector(releaseResources = true)
-                            updateNotification("Wake detector failed — using speech fallback")
-                            startSpeechRecognition()
-                        }
-                    }
+            detector.start { score ->
+                if (score >= WAKE_THRESHOLD && dedicatedDetectorActive && !handlingWake) {
+                    handleDedicatedWake()
                 }
             }
+            // Avoid silently waiting forever if the detector's audio pipeline is unsupported.
+            mainHandler.postDelayed({
+                if (dedicatedDetectorActive && !handlingWake) {
+                    dedicatedDetectorActive = false
+                    forceSpeechFallback = true
+                    runCatching { wakeDetector?.stop() }
+                    runCatching { wakeDetector?.release() }
+                    wakeDetector = null
+                    updateNotification("Using speech fallback — say Hey Jarvis")
+                    startSpeechRecognition()
+                }
+            }, DETECTOR_FALLBACK_DELAY_MS)
             return
         } catch (_: Exception) {
             dedicatedDetectorActive = false
-            stopWakeDetector()
+            runCatching { wakeDetector?.release() }
+            wakeDetector = null
             updateNotification("Wake detector unavailable — using speech fallback")
         }
 
         startSpeechRecognition()
-    }
-
-    private fun startExistingWakeDetector() {
-        val detector = wakeDetector ?: return
-        detectorPaused = false
-        dedicatedDetectorActive = true
-        updateNotification("Offline wake detector active — noise filtering enabled")
-        detectorJob = detectorScope.launch {
-            try {
-                detector.startDetection()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                mainHandler.post {
-                    if (dedicatedDetectorActive) {
-                        dedicatedDetectorActive = false
-                        forceSpeechFallback = true
-                        stopWakeDetector(releaseResources = true)
-                        updateNotification("Wake detector failed — using speech fallback")
-                        startSpeechRecognition()
-                    }
-                }
-            }
-        }
-    }
-
-    private fun stopWakeDetector(releaseResources: Boolean = false) {
-        detectorJob?.cancel()
-        detectorJob = null
-        if (releaseResources) {
-            // AndroidWakeWord's releaseResources() calls AudioRecord.stop() directly.
-            // Avoid calling it after pauseDetection() already stopped the recorder.
-            if (!detectorPaused) runCatching { wakeDetector?.releaseResources() }
-            wakeDetector = null
-            detectorPaused = false
-        } else {
-            runCatching { wakeDetector?.pauseDetection() }
-            detectorPaused = true
-        }
     }
 
     private fun hasCustomWakeModel(): Boolean =
@@ -266,10 +179,7 @@ class WakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(
                     RecognizerIntent.EXTRA_LANGUAGE,
-                    // The user speaks English, and en-IN repeatedly produced Android
-                    // ERROR_LANGUAGE_UNAVAILABLE (13) on the target device. Prefer the widely
-                    // available US-English pack for both on-device and system recognition.
-                    Locale.US.toLanguageTag()
+                    if (preferSystemRecognizer) Locale.US.toLanguageTag() else Locale("en", "IN").toLanguageTag()
                 )
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -342,21 +252,21 @@ class WakeWordService : Service() {
                 awaitingCommand = false
                 val command = phrases.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
                 if (command.isNotBlank()) {
-                    dispatchCapturedCommand(command)
+                    val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        putExtra("munch_wake_command", command)
+                    }
+                    updateNotification("Command heard — tap to run", command)
+                    runCatching { startActivity(launch) }
                 } else {
                     updateNotification("No command heard — listening again")
                 }
                 mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
                 return
             }
-            // Speech fallback can transcribe music lyrics. Require the wake phrase at the
-            // beginning of the final transcript, and use confidence when the provider supplies it.
-            val wakeIndex = phrases.indexOfFirst { wakePhraseStartRegex().containsMatchIn(it) }
-            val scores = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
-            val confidentEnough = wakeIndex >= 0 &&
-                (scores == null || wakeIndex >= scores.size || scores[wakeIndex] < 0f ||
-                    scores[wakeIndex] >= FALLBACK_WAKE_CONFIDENCE)
-            val wakePhrase = if (confidentEnough) phrases[wakeIndex] else null
+            // Speech engines return alternatives; don't discard a valid wake phrase just because
+            // the first transcript was wrong.
+            val wakePhrase = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
             if (wakePhrase != null) {
                 handlePhrase(wakePhrase.trim())
             } else {
@@ -368,8 +278,16 @@ class WakeWordService : Service() {
             mainHandler.postDelayed({ startRecognition() }, if (handlingWake) 12_000 else RESTART_DELAY_MS)
         }
         override fun onPartialResults(partialResults: android.os.Bundle?) {
-            // Partial transcripts often mistake music lyrics for wake phrases. Wait for final
-            // recognition and apply the stricter wake-prefix/confidence checks there.
+            if (awaitingCommand) return
+            val phrases = partialResults
+                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                .orEmpty()
+            // If the wake phrase and a complete command are already present in a partial
+            // transcript, hand it off immediately rather than waiting for end-of-speech.
+            // Wake on the phrase alone too; the Activity then opens normal command capture.
+            // This avoids requiring the user to say the command in the same recognition window.
+            val candidate = phrases.firstOrNull { wakePhraseRegex().containsMatchIn(it) }
+            if (candidate != null) handlePhrase(candidate.trim())
         }
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
     }
@@ -387,51 +305,22 @@ class WakeWordService : Service() {
     private fun handleDedicatedWake() {
         if (handlingWake || awaitingCommand) return
         dedicatedDetectorActive = false
-        stopWakeDetector()
+        runCatching { wakeDetector?.stop() }
+        runCatching { wakeDetector?.release() }
+        wakeDetector = null
         // Capture the command in the foreground service instead of relying on Android
         // allowing a background service to open an Activity immediately after the wake phrase.
         awaitingCommand = true
         handlingWake = false
-        updateNotification("Wake phrase heard — preparing command capture")
-        acknowledgeAndCaptureCommand()
+        updateNotification("Wake phrase heard — say your command")
+        mainHandler.post { startSpeechRecognition() }
         mainHandler.postDelayed({
             if (awaitingCommand) {
                 awaitingCommand = false
-                runCatching { recognizer?.cancel() }
-                listening = false
                 updateNotification("No command heard — listening again")
                 startRecognition()
             }
         }, COMMAND_CAPTURE_TIMEOUT_MS)
-    }
-
-    /** Speak a tiny acknowledgement, then start a fresh recognition session after TTS finishes. */
-    private fun acknowledgeAndCaptureCommand() {
-        if (!awaitingCommand) return
-        val engine = wakeTts
-        if (engine == null || !wakeTtsReady) {
-            startSpeechRecognition()
-            return
-        }
-        val utteranceId = "munch-wake-${System.currentTimeMillis()}"
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) = Unit
-            override fun onDone(utteranceId: String?) {
-                mainHandler.postDelayed({ if (awaitingCommand) startSpeechRecognition() }, 180L)
-            }
-            override fun onError(utteranceId: String?) {
-                mainHandler.post { if (awaitingCommand) startSpeechRecognition() }
-            }
-        })
-        val result = runCatching {
-            engine.speak("Yes?", TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-        }.getOrDefault(TextToSpeech.ERROR)
-        if (result == TextToSpeech.ERROR) {
-            startSpeechRecognition()
-        } else {
-            // Some OEM TTS engines omit onDone; retain a bounded recovery path.
-            mainHandler.postDelayed({ if (awaitingCommand && !listening) startSpeechRecognition() }, ACK_CAPTURE_FALLBACK_MS)
-        }
     }
 
     private fun handlePhrase(phrase: String) {
@@ -440,77 +329,18 @@ class WakeWordService : Service() {
         if (handlingWake) return
         handlingWake = true
         val command = match.groupValues.getOrElse(1) { "" }.trim().trim(',', '.', '!', '?')
-        if (command.isNotBlank()) {
-            dispatchCapturedCommand(command)
-            mainHandler.postDelayed({ handlingWake = false }, 10_000)
-            mainHandler.postDelayed({ startRecognition() }, 12_000)
-        } else {
-            // Keep the two-stage fallback in the service too; don't depend on a background
-            // Activity launch to begin command capture.
-            handlingWake = false
-            awaitingCommand = true
-            updateNotification("Wake phrase heard — preparing command capture")
-            acknowledgeAndCaptureCommand()
-            mainHandler.postDelayed({
-                if (awaitingCommand) {
-                    awaitingCommand = false
-                    runCatching { recognizer?.cancel() }
-                    listening = false
-                    updateNotification("No command heard — listening again")
-                    startRecognition()
-                }
-            }, COMMAND_CAPTURE_TIMEOUT_MS)
-        }
-    }
-
-    private fun isMediaActive(): Boolean =
-        runCatching { (getSystemService(AUDIO_SERVICE) as AudioManager).isMusicActive }.getOrDefault(false)
-
-    /**
-     * Run common play requests in the foreground service. This avoids depending on Android
-     * allowing an Activity launch from the background immediately after wake detection.
-     */
-    private fun dispatchCapturedCommand(rawCommand: String) {
-        val command = VoiceCommandParser.stripWakePhrase(rawCommand)
-        if (command.isBlank()) {
-            updateNotification("Wake phrase heard — say your command", listen = true)
-            return
-        }
-        if (VoiceCommandParser.isMusicAppCommand(command)) {
-            val opened = AssistantServices.openMusicAndResume(this)
-            updateNotification(
-                if (opened) "YouTube Music opened — resume requested, playback not confirmed"
-                else "Couldn't open YouTube Music"
-            )
-            awaitingCommand = false
-            handlingWake = false
-            mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
-            return
-        }
-        val query = VoiceCommandParser.youtubePlayQuery(command)
-        if (query != null) {
-            updateNotification("Finding YouTube playback for $query…")
-            AssistantServices.playYouTubeSearch(this, query) { opened, autoPlay ->
-                updateNotification(
-                    when {
-                        !opened -> "Couldn't open YouTube for $query"
-                        autoPlay -> "Opened video for $query"
-                        else -> "YouTube opened; automatic playback not confirmed"
-                    }
-                )
-                awaitingCommand = false
-                handlingWake = false
-                mainHandler.postDelayed({ startRecognition() }, RESTART_DELAY_MS)
-            }
-            return
-        }
-        val launch = Intent(this@WakeWordService, MainActivity::class.java).apply {
+        val launch = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            putExtra("munch_wake_command", command)
+            if (command.isNotBlank()) putExtra("munch_wake_command", command)
+            else putExtra("munch_wake_listen", true)
         }
-        updateNotification("Command heard — opening Munch", command)
-        val opened = runCatching { startActivity(launch); true }.getOrDefault(false)
-        if (!opened) updateNotification("Command heard — tap notification to run", command)
+        // Android can block activity launches from background services on some versions.
+        // The persistent notification remains tappable as a reliable fallback.
+        updateNotification("Wake phrase heard — tap to continue", command, command.isBlank())
+        runCatching { startActivity(launch) }
+        mainHandler.postDelayed({ handlingWake = false }, 10_000)
+        // Cancellation can suppress the normal onResults callback, so schedule recovery here too.
+        mainHandler.postDelayed({ startRecognition() }, 12_000)
     }
 
     private fun createNotificationChannel() {
@@ -566,12 +396,9 @@ class WakeWordService : Service() {
         recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
-        wakeTtsReady = false
-        runCatching { wakeTts?.stop() }
-        runCatching { wakeTts?.shutdown() }
-        wakeTts = null
-        stopWakeDetector(releaseResources = true)
-        detectorScope.cancel()
+        runCatching { wakeDetector?.stop() }
+        runCatching { wakeDetector?.release() }
+        wakeDetector = null
         dedicatedDetectorActive = false
         mediaSession?.isActive = false
         mediaSession?.release()
@@ -583,18 +410,13 @@ class WakeWordService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private fun wakePhraseStartRegex() = Regex("^\\s*hey[\\s,]+(?:jarvis|mun?ch)\\b[,:;.!? ]*(.*)$", RegexOption.IGNORE_CASE)
-        private const val FALLBACK_WAKE_CONFIDENCE = 0.65f
+        private fun wakePhraseRegex() = Regex("\\bhey[\\s,]+(?:jarvis|mun?ch)\\b", RegexOption.IGNORE_CASE)
         private const val CHANNEL_ID = "munch_wake_listener"
         private const val NOTIFICATION_ID = 7204
         private const val RESTART_DELAY_MS = 1_200L
+        private const val DETECTOR_FALLBACK_DELAY_MS = 20_000L
         private const val COMMAND_CAPTURE_TIMEOUT_MS = 8_000L
         private const val CUSTOM_MODEL_ASSET = "hey_munch.onnx"
-        // Keep the detector permissive enough for quiet speech; media-aware gating is applied
-        // in the callback after the VAD-filtered classifier score arrives.
-        private const val DETECTOR_CALLBACK_THRESHOLD = 0.30f
-        private const val WAKE_THRESHOLD = 0.43f
-        private const val MEDIA_PLAYING_WAKE_THRESHOLD = 0.62f
-        private const val ACK_CAPTURE_FALLBACK_MS = 2_000L
+        private const val WAKE_THRESHOLD = 0.55f
     }
 }
