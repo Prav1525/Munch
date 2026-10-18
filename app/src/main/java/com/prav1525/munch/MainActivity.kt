@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -37,6 +38,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,13 +70,44 @@ private val Hairline = Color(0xFF283143)
 
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
+    private var selectedVoiceName: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        selectedVoiceName = getSharedPreferences("munch_preferences", MODE_PRIVATE).getString("tts_voice_name", null)
         tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault()
+            if (status == TextToSpeech.SUCCESS) {
+                val engine = tts ?: return@TextToSpeech
+                val voices = engine.voices.orEmpty()
+                val saved = selectedVoiceName?.let { name -> voices.firstOrNull { it.name == name } }
+                val british = voices.filter { it.locale.language == "en" && it.locale.country == "GB" }
+                val preferred = british.firstOrNull { it.name.contains("female", ignoreCase = true) || it.name.contains("woman", ignoreCase = true) }
+                    ?: british.firstOrNull()
+                    ?: voices.firstOrNull { it.locale.language == "en" }
+                val chosen = saved ?: preferred
+                if (chosen != null) {
+                    engine.voice = chosen
+                    selectedVoiceName = chosen.name
+                } else engine.language = Locale.UK
+            }
         }
         setContent { MaterialTheme { MunchHome(this) } }
+    }
+
+    fun availableVoices(): List<Voice> = tts?.voices.orEmpty()
+        .filter { it.locale.language == "en" }
+        .sortedWith(compareBy<Voice>({ it.locale.country != "GB" }, { it.name }))
+
+    fun currentVoiceName(): String = tts?.voice?.let { it.locale.displayName + " — " + it.name } ?: "System default"
+
+    fun isVoiceSelected(name: String): Boolean = tts?.voice?.name == name || selectedVoiceName == name
+
+    fun selectVoice(name: String) {
+        val voice = tts?.voices?.firstOrNull { it.name == name } ?: return
+        runCatching { tts?.voice = voice }.onSuccess {
+            selectedVoiceName = voice.name
+            getSharedPreferences("munch_preferences", MODE_PRIVATE).edit().putString("tts_voice_name", voice.name).apply()
+        }
     }
 
     fun speak(text: String) {
@@ -97,6 +130,8 @@ private fun MunchHome(activity: MainActivity) {
     var selectedAction by remember { mutableStateOf<String?>(null) }
     var showAbout by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showVoicePicker by remember { mutableStateOf(false) }
+    var selectedVoiceLabel by remember { mutableStateOf(activity.currentVoiceName()) }
     var showConversation by remember { mutableStateOf(false) }
     var showMapDialog by remember { mutableStateOf(false) }
     var showReminderDialog by remember { mutableStateOf(false) }
@@ -245,6 +280,11 @@ private fun MunchHome(activity: MainActivity) {
             title = { Text("Munch settings", color = White) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Assistant voice", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    TextButton(onClick = { selectedVoiceLabel = activity.currentVoiceName(); showVoicePicker = true }) {
+                        Text(selectedVoiceLabel, color = White)
+                    }
+                    Text("Choose an installed English voice. British voices are listed first; voice gender labels depend on your phone's speech engine.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("Gemini API key", color = Cyan, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(value = apiKey, onValueChange = { apiKey = it }, label = { Text("Paste your API key") },
                         placeholder = { Text("Key stays on this device") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -257,6 +297,41 @@ private fun MunchHome(activity: MainActivity) {
             },
             confirmButton = { TextButton(onClick = { AssistantServices.saveApiKey(context, apiKey); apiKey = ""; showSettings = false; statusText = "AI settings saved" }) { Text("SAVE", color = Cyan) } },
             dismissButton = { TextButton(onClick = { showSettings = false }) { Text("CANCEL", color = Soft) } }
+        )
+    }
+
+    if (showVoicePicker) {
+        val voices = activity.availableVoices()
+        AlertDialog(
+            onDismissRequest = { showVoicePicker = false },
+            containerColor = SurfaceDark,
+            title = { Text("Choose assistant voice", color = White) },
+            text = {
+                Column(Modifier.fillMaxWidth().height(300.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (voices.isEmpty()) {
+                        Text("No English voices are available yet. Install an English voice in your Android Text-to-speech settings and try again.", color = Soft, fontSize = 12.sp)
+                    }
+                    voices.forEach { voice ->
+                        val label = voice.locale.displayName + " — " + voice.name
+                        Row(Modifier.fillMaxWidth().clickable {
+                            activity.selectVoice(voice.name)
+                            selectedVoiceLabel = activity.currentVoiceName()
+                            showVoicePicker = false
+                        }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = activity.isVoiceSelected(voice.name), onClick = {
+                                activity.selectVoice(voice.name)
+                                selectedVoiceLabel = activity.currentVoiceName()
+                                showVoicePicker = false
+                            })
+                            Column(Modifier.weight(1f)) {
+                                Text(label, color = White, fontSize = 12.sp, lineHeight = 16.sp)
+                                Text((if (voice.locale.country == "GB") "British English" else voice.locale.displayLanguage) + " · " + (if (voice.isNetworkConnectionRequired) "Network voice" else "On-device voice"), color = Soft, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showVoicePicker = false }) { Text("DONE", color = Cyan) } }
         )
     }
 
