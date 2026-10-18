@@ -37,7 +37,7 @@ object AssistantServices {
     }
 
     fun isGroqFallbackEnabled(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(GROQ_FALLBACK_ENABLED, false)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(GROQ_FALLBACK_ENABLED, true)
 
     fun setGroqFallbackEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
