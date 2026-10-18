@@ -33,6 +33,16 @@ class VoiceCommandParserTest {
     }
 
     @Test
+    fun parsesCommonMediaTransportCommands() {
+        assertEquals("next", VoiceCommandParser.mediaCommand("Hey Munch, skip song"))
+        assertEquals("previous", VoiceCommandParser.mediaCommand("Hey Jarvis, previous track"))
+        assertEquals("pause", VoiceCommandParser.mediaCommand("pause music"))
+        assertEquals("resume", VoiceCommandParser.mediaCommand("continue playing"))
+        assertEquals("toggle", VoiceCommandParser.mediaCommand("toggle playback"))
+        assertNull(VoiceCommandParser.mediaCommand("tell me a joke"))
+    }
+
+    @Test
     fun preservesWordsThatContainWakeName() {
         assertEquals("munch is a word in this sentence", VoiceCommandParser.stripWakePhrase("munch is a word in this sentence"))
     }
