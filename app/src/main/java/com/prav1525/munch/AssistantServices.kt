@@ -293,7 +293,9 @@ object AssistantServices {
 
     /** Launches an installed launcher activity by its visible app label, e.g. "Spotify". */
     fun openInstalledApp(context: Context, requestedName: String): Boolean {
-        val requested = requestedName.trim().lowercase(Locale.ROOT)
+        var requested = requestedName.trim().lowercase(Locale.ROOT)
+        requested = requested.removeSuffix(" application").removeSuffix(" app").trim()
+        if (requested == "navigation" || requested == "maps") requested = "google maps"
         if (requested.isBlank()) return false
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val matches = runCatching { context.packageManager.queryIntentActivities(launcherIntent, 0) }.getOrDefault(emptyList())
