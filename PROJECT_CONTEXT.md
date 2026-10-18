@@ -120,3 +120,50 @@
 - Commit: `5d1b991270b6d594f63939942e29b6b120962d41`.
 - GitHub Actions run 112 passed `gradle --no-daemon testDebugUnitTest assembleDebug` and uploaded artifact `munch-debug-apk`. APK size: 79,730,563 bytes; SHA-256: `96110b19c1d5b47e3e1968f69029380858cff2dd07991f1b94ef26830502f93e`. Artifact ZIP integrity check passed.
 - This is a code/build fix, not a physical-device confirmation. Still required on the user's phone: test wake listening with screen on/off, verify whether error 11/13 no longer repeats, test the headset button, and test YouTube Music with and without an existing queue. The built-in “Hey Jarvis” model is still the temporary detector until a compatible custom `hey_munch.onnx` model is bundled.
+
+
+## YouTube voice autoplay attempt (2026-10-18)
+- Branch: `fix/youtube-voice-autoplay`; pull request: https://github.com/Prav1525/Munch/pull/2.
+- Added `AssistantServices.playYouTubeSearch`: resolves a YouTube search page to a video ID off the main thread, then opens the direct watch URL in the YouTube app where available. If the search page cannot be resolved, it falls back to the search URL and reports that autoplay could not be confirmed.
+- Generic `play <query>`, `play <query> on YouTube`, and `open YouTube and play <query>` route through this flow. A request ending in “song/songs” is expanded to a Tamil movie soundtrack/full-album search, so “play Jailer song” looks for Jailer Tamil movie songs.
+- GitHub Actions run 116 for source commit `bb80cfdf52ecd05d48394089c0d20eb4e01b10ec` passed `testDebugUnitTest assembleDebug` and uploaded the `munch-debug-apk` artifact: https://github.com/Prav1525/Munch/actions/runs/39128854555.
+- This is not yet physical-device verified. YouTube can change its HTML/search markup; if no video ID can be resolved, the fallback opens results and will not autoplay. Even a direct watch URL can be affected by YouTube sign-in, network, app, or playback restrictions. Test “Hey Munch, play Jailer song” on the phone before claiming reliable playback. No APK should be described as device-verified.
+
+## Whole-project reliability review (2026-10-18)
+- Reviewed the Gradle module configuration, WakeWordService.kt, MainActivity.kt command router, VoiceCommandParser.kt, AssistantServices.kt, OfflineAssistant.kt, AndroidManifest.xml, reminder receiver, and existing unit tests.
+- Fixed Kotlin 2.3 compiler configuration by moving the JVM target to the module-level compilerOptions DSL. CI is required to validate the DSL and all downstream compilation.
+- Fixed a critical wake lifecycle bug: the openWakeWord library's listener is called when the wake word is detected, not continuously with every audio score. The old 20-second timer therefore switched to speech fallback after ordinary silence, even if the detector was healthy. Removed that timer; detector initialization exceptions switch persistently to speech fallback.
+- Added a microphone-permission guard before starting the detector, main-thread serialization and duplicate-trigger checks for detector handoff, and an awaitingCommand guard so normal detector restarts cannot interrupt command capture.
+- Normalize the wake phrase before command routing, including commands received through the speech fallback, and make parser case handling locale-independent.
+- Ensure Gemini callback delivery is safe for UI callers by delivering results on the Android main thread.
+- Corrected YouTube voice responses so opening a direct video URL is not described as confirmed playback; the app cannot reliably verify YouTube's actual playback state through this intent flow.
+- Important unresolved product limitation: no custom app/src/main/assets/hey_munch.onnx model is bundled in this source snapshot. The dedicated detector therefore uses the library's built-in “Hey Jarvis” model; “Hey Munch” depends on Android speech-recognition fallback, which is not a reliable always-on local keyword detector. A compatible trained model and real-device false-trigger/noise tests are still needed.
+- Important AI limitation: no verified GGUF inference engine/model is included in this source snapshot. The assistant is deterministic offline rules with optional online Groq fallback, not a full offline local LLM.
+- Real-device tests for media noise, screen-off operation, Bluetooth/headset button, actual YouTube autoplay, battery use, and Android background launch restrictions remain outstanding.
+- Latest build/test status after these changes: pending GitHub Actions; do not distribute an APK until the latest branch head passes testDebugUnitTest assembleDebug and the APK artifact is present and inspected.
+
+
+## Media-agent control iteration (2026-10-18)
+- Added native Android media transport key dispatch for next, previous, pause, play/resume, and playback toggle. These commands target Android's currently active media session; a third-party player may ignore them or may not publish a controllable session.
+- Voice routing now recognizes common next/skip, previous/back, pause, and resume commands before generic AI fallback.
+- Generic `play <query>` requests now open YouTube Music search rather than opening a random YouTube video watch page. This avoids treating a music request as a video request, but does not yet auto-select a result or guarantee autoplay. Explicit `play <query> on YouTube` still follows the video path.
+- CI build/test is required for the latest changes. Physical-device tests are still needed to confirm media keys reach YouTube Music and that the background wake/command capture remains active while another app is foregrounded.
+- Next step for true agent-like behavior: use a user-enabled, transparent AccessibilityService (only if the user opts in) to select the first suitable search result and handle app UI transitions, paired with media-session commands for transport. Do not use hidden UI automation, and do not claim guaranteed control across every music app. A service like this must clearly disclose its scope and have a safe fallback when UI structure changes.
+
+- Follow-up improvement: the foreground wake service now handles next/previous/pause/resume/toggle commands directly when the wake phrase and command are recognized, avoiding launching Munch over the current music player for these transport actions. The service records the action and updates its ongoing notification; this is command dispatch, not verified playback-state confirmation.
+
+
+## Dual music-control update (2026-10-18)
+- Added an opt-in Android AccessibilityService scoped to the YouTube Music package. When the user explicitly requests a named track and has enabled the helper in Android Accessibility settings, Munch opens YouTube Music search and attempts to click only a visible accessible result whose label matches the requested title. It does not click arbitrary results. UI accessibility labels differ by app version, so this is best-effort and must be tested on a physical device.
+- Added a Settings shortcut to Android Accessibility settings and an explicit disclosure describing the helper's narrow behavior and limitations. The service is not enabled automatically.
+- Added Spotify app launch and Spotify search deep-link routing for commands such as “play [track] on Spotify” and “open Spotify”. Existing Android media transport controls provide next/previous/pause/resume for whichever player owns the active media session.
+- Important limitation: this commit does not yet include Spotify OAuth/Web API playback, queue management, or reliable automatic selection/playback in Spotify. Search opens the Spotify app/web search and user selection may still be needed. Spotify Web API integration requires a registered developer app, OAuth user consent, and an active Spotify Premium playback account for playback-control endpoints. Do not claim full agent-level parity until that is implemented and verified.
+- AccessibilityService use must remain transparent, user-enabled, narrowly tied to the explicit music command, and compliant with current Android/Google Play policy. Never claim physical-device success based only on CI.
+- CI run for the dual music-control changes: pending; inspect the latest run on this branch before distributing an APK.
+
+
+## Spotify API follow-up (2026-10-18)
+- Added a Spotify Web API client using Authorization Code + PKCE. It stores the user-supplied Spotify Client ID and OAuth tokens in app-private preferences; no Spotify client secret is embedded. The app uses a `munch://spotify-callback` redirect that must be registered exactly in the user's Spotify developer dashboard.
+- Settings now exposes the Spotify Client ID field and Connect Spotify action. After OAuth authorization, “play [track] on Spotify” searches the Spotify catalog and asks the active Spotify device to play the first track result. Next/previous/pause/resume/toggle commands use the Spotify Web API when connected, with Android media-key fallback when not connected.
+- Spotify Web API playback requires Premium and an active device; a search result or HTTP success is not a guarantee that sound was heard. Test on a phone with Spotify installed, a valid Client ID, the redirect URI registered, and the user signed in.
+- Spotify sign-in and API playback have not yet been verified against a real Spotify developer app. Latest CI must pass before an APK is distributed.
