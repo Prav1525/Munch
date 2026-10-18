@@ -315,7 +315,7 @@ private fun MunchHome(activity: MainActivity) {
                     }
                     Text("Choose an installed English voice. British voices are listed first; voice gender labels depend on your phone's speech engine.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text("On-device AI model", color = Cyan, fontWeight = FontWeight.SemiBold)
-                    Text("Qwen3 4B Q4_K_M runs on your phone after a one-time model download (about 2.5–3 GB). Inference is local; no Gemini API key is used. Keep the phone cool and close other apps if memory is tight.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Text("Qwen3 1.7B Q4_K_M is tuned for faster replies on your phone (about 1.2 GB download). Inference is local; no Gemini API key is used.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     Text(modelStatus, color = if (modelStatus.startsWith("Ready")) Cyan else Soft, fontSize = 11.sp)
                     Button(
                         onClick = {
@@ -325,7 +325,7 @@ private fun MunchHome(activity: MainActivity) {
                                 LocalLlmService.downloadAndLoad(context, { modelStatus = it }) { result ->
                                     modelBusy = false
                                     modelStatus = result.fold(
-                                        { "Ready — Qwen3 is running on-device." },
+                                        { "Ready — Qwen3 1.7B is running on-device." },
                                         { "Model unavailable: ${it.message ?: "download or load failed"}" }
                                     )
                                     statusText = if (result.isSuccess) "Local AI ready" else "Offline fallback ready"
