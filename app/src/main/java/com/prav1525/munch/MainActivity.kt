@@ -581,34 +581,84 @@ private fun runAssistantRequest(
     val lower = prompt.lowercase(Locale.ROOT)
     when {
         Regex("^(?:please\\s+)?(?:next|skip)(?:\\s+(?:song|track|music))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "next") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
             val sent = AssistantServices.sendMediaCommand(context, "next")
             val answer = if (sent) "Sent the next-track command to your active music player. If the track does not change, that app may not expose a controllable media session." else "I could not send the next-track command."
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
+            }
         }
         Regex("^(?:previous|go back|last)(?:\\s+(?:song|track|music))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "previous") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
             val sent = AssistantServices.sendMediaCommand(context, "previous")
             val answer = if (sent) "Sent the previous-track command to your active music player." else "I could not send the previous-track command."
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
+            }
         }
         Regex("^(?:pause|pause music|stop music)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "pause") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
             val sent = AssistantServices.sendMediaCommand(context, "pause")
             val answer = if (sent) "Sent the pause command to your active media player." else "I could not send the pause command."
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
+            }
         }
         Regex("^(?:resume|resume music|continue music|continue playing)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "resume") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
             val sent = AssistantServices.sendMediaCommand(context, "resume")
             val answer = if (sent) "Sent the play command to your active media player." else "I could not send the play command."
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
+            }
         }
         Regex("^(?:play\\s+pause|toggle playback|toggle music)[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
+            if (SpotifyAgent.isConnected(context)) {
+                setBusy(true)
+                SpotifyAgent.controlPlayback(context, "toggle") { result ->
+                    setBusy(false)
+                    val answer = result.getOrElse { "Spotify playback command failed: " + (it.message ?: "unknown error") }
+                    messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                    setStatus(answer); activity.speak(answer)
+                }
+            } else {
             val sent = AssistantServices.sendMediaCommand(context, "toggle playback")
             val answer = if (sent) "Sent the playback toggle command." else "I could not toggle playback."
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
+            }
         }
         Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val match = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
