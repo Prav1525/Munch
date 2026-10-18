@@ -20,6 +20,8 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.content.pm.ServiceInfo
 import com.openwakeword.OpenWakeWord
 import java.util.Locale
@@ -42,10 +44,35 @@ class WakeWordService : Service() {
     private var handlingWake = false
     private var awaitingCommand = false
     private var mediaSession: MediaSessionCompat? = null
+    private var serviceTts: TextToSpeech? = null
+    private var serviceTtsReady = false
+    private var speakingResponse = false
+    private var pendingSpokenResponse: Pair<String, String?>? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        serviceTts = TextToSpeech(this) { status ->
+            mainHandler.post {
+                serviceTtsReady = status == TextToSpeech.SUCCESS
+                if (serviceTtsReady) {
+                    serviceTts?.language = Locale.UK
+                    serviceTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) = Unit
+                        override fun onError(utteranceId: String?) {
+                            mainHandler.post { finishSpokenResponse() }
+                        }
+                        override fun onDone(utteranceId: String?) {
+                            mainHandler.post { finishSpokenResponse() }
+                        }
+                    })
+                    pendingSpokenResponse?.let { (message, command) ->
+                        pendingSpokenResponse = null
+                        speakServiceResponse(message, command)
+                    }
+                }
+            }
+        }
         // Keep a media session active while the user-enabled foreground listener runs so
         // Bluetooth/headset media buttons can reach Munch even when its Activity is hidden.
         mediaSession = MediaSessionCompat(this, "MunchNeckband").apply {
@@ -99,7 +126,7 @@ class WakeWordService : Service() {
     }
 
     private fun startRecognition() {
-        if (listening || dedicatedDetectorActive || handlingWake || awaitingCommand ||
+        if (speakingResponse || listening || dedicatedDetectorActive || handlingWake || awaitingCommand ||
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
 
@@ -162,7 +189,7 @@ class WakeWordService : Service() {
         runCatching { assets.list("")?.contains(CUSTOM_MODEL_ASSET) == true }.getOrDefault(false)
 
     private fun startSpeechRecognition() {
-        if (listening || handlingWake ||
+        if (speakingResponse || listening || handlingWake ||
             !getSharedPreferences("munch_preferences", MODE_PRIVATE)
                 .getBoolean("wake_word_enabled", false)) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
@@ -349,8 +376,7 @@ class WakeWordService : Service() {
                 val message = result.getOrElse {
                     "Spotify playback command failed: " + (it.message ?: "open Spotify and start playback first")
                 }
-                updateNotification(message, rawCommand)
-                AssistantServices.saveMessage(this, "assistant", message)
+                deliverServiceResponse(message, rawCommand)
             }
             updateNotification("Sending $normalized command to Spotify", rawCommand)
             return true
@@ -368,8 +394,7 @@ class WakeWordService : Service() {
             normalized == "resume" -> "Play command sent to the active media player"
             else -> "Playback toggle command sent to the active media player"
         }
-        updateNotification(message, rawCommand)
-        AssistantServices.saveMessage(this, "assistant", message)
+        deliverServiceResponse(message, rawCommand)
         return true
     }
 
@@ -385,8 +410,7 @@ class WakeWordService : Service() {
         if (command.isBlank()) return false
 
         fun report(message: String) {
-            updateNotification(message, command)
-            AssistantServices.saveMessage(this, "assistant", message)
+            deliverServiceResponse(message, command)
         }
 
         // Answer simple device questions and controls locally, even with the app UI closed.
@@ -497,6 +521,46 @@ class WakeWordService : Service() {
         mainHandler.postDelayed({ startRecognition() }, 12_000)
     }
 
+    /** Publish a final action result in the notification/history and speak it hands-free. */
+    private fun deliverServiceResponse(message: String, command: String? = null) {
+        updateNotification(message, command)
+        AssistantServices.saveMessage(this, "assistant", message)
+        if (!getSharedPreferences("munch_preferences", MODE_PRIVATE)
+                .getBoolean("wake_word_enabled", false)) return
+        if (!serviceTtsReady) {
+            pendingSpokenResponse = message to command
+            return
+        }
+        speakServiceResponse(message, command)
+    }
+
+    private fun speakServiceResponse(message: String, command: String?) {
+        val tts = serviceTts ?: return
+        // Stop microphone capture before speaking so the detector cannot hear its own reply.
+        speakingResponse = true
+        runCatching { wakeDetector?.stop() }
+        runCatching { wakeDetector?.release() }
+        wakeDetector = null
+        dedicatedDetectorActive = false
+        listening = false
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
+        recognizer = null
+        val result = runCatching {
+            tts.speak(message.take(350), TextToSpeech.QUEUE_FLUSH, null, "munch-service-response")
+        }.getOrDefault(TextToSpeech.ERROR)
+        if (result == TextToSpeech.ERROR) finishSpokenResponse()
+    }
+
+    private fun finishSpokenResponse() {
+        if (!speakingResponse) return
+        speakingResponse = false
+        if (getSharedPreferences("munch_preferences", MODE_PRIVATE)
+                .getBoolean("wake_word_enabled", false)) {
+            mainHandler.postDelayed({ startRecognition() }, 700L)
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
@@ -546,6 +610,10 @@ class WakeWordService : Service() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
+        speakingResponse = false
+        serviceTts?.stop()
+        serviceTts?.shutdown()
+        serviceTts = null
         listening = false
         recognizer?.cancel()
         recognizer?.destroy()
