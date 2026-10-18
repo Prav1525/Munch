@@ -545,11 +545,21 @@ private fun runAssistantRequest(
                             setStatus("Online answer")
                             activity.speak(onlineAnswer)
                         },
-                        onFailure = {
+                        onFailure = { error ->
                             val fallback = OfflineAssistant.respond(prompt)
                             messages.add(ChatLine("assistant", fallback))
                             AssistantServices.saveMessage(context, "assistant", fallback)
-                            setStatus("Offline fallback • online AI unavailable")
+                            val reason = error.message.orEmpty()
+                            setStatus("Offline fallback • " + when {
+                                reason.contains("no Groq API key", ignoreCase = true) -> "add Groq API key in Settings"
+                                reason.contains("HTTP 401") -> "Groq key invalid"
+                                reason.contains("HTTP 403") -> "Groq access denied"
+                                reason.contains("HTTP 429") -> "Groq rate limit reached"
+                                reason.contains("timed out", ignoreCase = true) || reason.contains("timeout", ignoreCase = true) -> "Groq timed out"
+                                reason.contains("Unable to resolve", ignoreCase = true) || reason.contains("failed to connect", ignoreCase = true) -> "check internet connection"
+                                reason.isNotBlank() -> reason.take(100)
+                                else -> "Groq unavailable"
+                            })
                             activity.speak(fallback)
                         }
                     )
@@ -557,7 +567,7 @@ private fun runAssistantRequest(
             } else {
                 messages.add(ChatLine("assistant", answer))
                 AssistantServices.saveMessage(context, "assistant", answer)
-                setStatus("Offline assistant")
+                setStatus(if (needsOnlineHelp && AssistantServices.getGroqApiKey(context).isBlank()) "Offline fallback • add Groq API key in Settings" else if (needsOnlineHelp && !AssistantServices.isGroqFallbackEnabled(context)) "Offline fallback • enable online AI in Settings" else "Offline assistant")
                 activity.speak(answer)
             }
         }
