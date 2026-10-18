@@ -69,8 +69,9 @@ object AssistantServices {
                 val body = JSONObject()
                     .put("model", "openai/gpt-oss-20b")
                     .put("messages", messages)
-                    .put("max_tokens", 64)
+                    .put("max_tokens", 512)
                     .put("temperature", 0.3)
+                    .put("reasoning_effort", "low")
                     .toString()
                 try {
                     connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
@@ -81,9 +82,16 @@ object AssistantServices {
                         val detail = runCatching { JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("")
                         throw IllegalStateException("Groq API error (HTTP $code)" + if (detail.isNotBlank()) ": ${detail.take(180)}" else ".")
                     }
-                    val answer = JSONObject(raw).optJSONArray("choices")?.optJSONObject(0)
-                        ?.optJSONObject("message")?.optString("content").orEmpty().trim()
-                    if (answer.isBlank()) throw IllegalStateException("Groq returned an empty answer.")
+                    val choice = JSONObject(raw).optJSONArray("choices")?.optJSONObject(0)
+                    val message = choice?.optJSONObject("message")
+                    val answer = message?.optString("content").orEmpty().trim()
+                    if (answer.isBlank()) {
+                        val finishReason = choice?.optString("finish_reason").orEmpty()
+                        throw IllegalStateException(
+                            "Groq returned an empty answer" +
+                                if (finishReason.isNotBlank()) " (finish_reason=$finishReason)." else "."
+                        )
+                    }
                     answer
                 } finally {
                     connection.disconnect()
