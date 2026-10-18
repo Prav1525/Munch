@@ -14,25 +14,18 @@ import java.util.Locale
  */
 object DeviceCommandActions {
     fun execute(context: Context, rawCommand: String): String? {
-        val command = VoiceCommandParser.stripWakePhrase(rawCommand)
-            .lowercase(Locale.ROOT)
-            .replace(Regex("[.!?]+$"), "")
-            .trim()
-            .replace(Regex("\\s+"), " ")
-
-        return when (command) {
-            "what time is it", "tell me the time", "current time", "time please" ->
+        return when (VoiceCommandParser.deviceCommand(rawCommand)) {
+            "time" ->
                 "It is " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()) + "."
-            "what is the date", "what's the date", "what date is it", "today's date", "current date" ->
+            "date" ->
                 "Today is " + SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault()).format(Date()) + "."
-            "battery", "battery status", "battery level", "what is my battery", "what's my battery",
-            "how much battery", "what is my battery level", "what percentage is my battery" ->
+            "battery" ->
                 batteryStatus(context)
-            "volume up", "increase volume", "turn volume up", "louder" -> adjustVolume(context, AudioManager.ADJUST_RAISE)
-            "volume down", "decrease volume", "turn volume down", "quieter" -> adjustVolume(context, AudioManager.ADJUST_LOWER)
-            "mute", "mute volume", "mute media" -> adjustVolume(context, AudioManager.ADJUST_MUTE)
-            "unmute", "unmute volume", "unmute media" -> adjustVolume(context, AudioManager.ADJUST_UNMUTE)
-            "what can you do", "help", "list your commands", "what commands do you know" ->
+            "volume_up" -> adjustVolume(context, AudioManager.ADJUST_RAISE)
+            "volume_down" -> adjustVolume(context, AudioManager.ADJUST_LOWER)
+            "mute" -> adjustVolume(context, AudioManager.ADJUST_MUTE)
+            "unmute" -> adjustVolume(context, AudioManager.ADJUST_UNMUTE)
+            "help" ->
                 "I can control music playback, search Spotify and YouTube Music, open apps, set reminders, navigate with Maps, tell the time and date, check battery, and adjust media volume."
             else -> null
         }
