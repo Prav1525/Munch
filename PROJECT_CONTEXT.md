@@ -120,3 +120,13 @@
 - Commit: `5d1b991270b6d594f63939942e29b6b120962d41`.
 - GitHub Actions run 112 passed `gradle --no-daemon testDebugUnitTest assembleDebug` and uploaded artifact `munch-debug-apk`. APK size: 79,730,563 bytes; SHA-256: `96110b19c1d5b47e3e1968f69029380858cff2dd07991f1b94ef26830502f93e`. Artifact ZIP integrity check passed.
 - This is a code/build fix, not a physical-device confirmation. Still required on the user's phone: test wake listening with screen on/off, verify whether error 11/13 no longer repeats, test the headset button, and test YouTube Music with and without an existing queue. The built-in “Hey Jarvis” model is still the temporary detector until a compatible custom `hey_munch.onnx` model is bundled.
+
+## Phone agent prototype (2026-10-19)
+- Added PR #7 on branch `agent/phone-control-loop`: https://github.com/Prav1525/Munch/pull/7.
+- Added opt-in `PhoneAgentService` Android AccessibilityService with screen-tree inspection, bounded Groq planning, one action per iteration, re-observation after actions, and a hard limit of 8 steps.
+- Added voice entry points: `agent <task>`, `use screen to <task>`, `use my phone to <task>`; `stop agent` requests cancellation. Added a Settings shortcut to Android Accessibility settings.
+- Requires user to enable the Munch accessibility service manually, configure Groq key, enable online AI, and keep the phone unlocked/on the target app. The service reads visible UI labels and sends a compact screen snapshot plus the task to Groq for planning; the settings UI discloses this.
+- The task runner blocks a small list of high-risk task phrases, credential-like text, and obvious sensitive controls. This is a prototype guardrail, not a complete safety classifier. Do not use it for payments, purchases, messaging submission, account changes, credentials, or destructive actions.
+- Task limit: 8 actions; waits about 1.1 seconds between actions; uses the existing Groq model `openai/gpt-oss-20b`. The agent verifies via a fresh screen observation but cannot guarantee success for all apps or screens.
+- Important limitation: the code has been committed to a feature branch and PR opened, but CI build/tests and physical-device testing are not yet verified. Do not distribute an APK until CI succeeds, the artifact is inspected, and real-device tests are performed.
+- Next: check PR checks, fix compile/test failures, build and inspect APK, then test Accessibility permission, task execution, cancellation, and screen-on behavior on device.
