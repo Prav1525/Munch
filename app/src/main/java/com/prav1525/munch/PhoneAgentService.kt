@@ -41,10 +41,13 @@ class PhoneAgentService : AccessibilityService() {
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == PhoneAgentController.ACTION_RUN_TASK) {
-                val requested = intent.getStringExtra("goal").orEmpty().trim()
-                if (requested.isNotBlank()) startTask(requested)
+            if (intent?.action != PhoneAgentController.ACTION_RUN_TASK) return
+            if (intent.getBooleanExtra("stop", false)) {
+                finish("Stopped at your request. The task may be incomplete.", true)
+                return
             }
+            val requested = intent.getStringExtra("goal").orEmpty().trim()
+            if (requested.isNotBlank()) startTask(requested)
         }
     }
 
@@ -277,8 +280,12 @@ class PhoneAgentService : AccessibilityService() {
     }
 
     private fun say(message: String) {
-        if (Build.VERSION.SDK_INT >= 26) tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "munch-agent")
-        else @Suppress("DEPRECATION") tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null)
+        if (Build.VERSION.SDK_INT >= 26) {
+            tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "munch-agent")
+        } else {
+            @Suppress("DEPRECATION")
+            tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null)
+        }
     }
 
     private fun notifyStatus(title: String, message: String) {
