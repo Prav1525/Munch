@@ -404,6 +404,12 @@ private fun MunchHome(activity: MainActivity) {
                             AssistantServices.setGroqFallbackEnabled(context, it)
                         })
                     }
+                    Text("Phone agent", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("Let Munch inspect visible app controls and perform a bounded sequence of taps, typing, scrolling and navigation for tasks you explicitly request. Screen text is sent to Groq for planning. Do not use it for payments, purchases, credentials or destructive actions.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Button(onClick = { PhoneAgentController.openAccessibilitySettings(context) }, modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) {
+                        Text(if (PhoneAgentController.isEnabled(context)) "PHONE AGENT ENABLED · ACCESSIBILITY SETTINGS" else "ENABLE PHONE AGENT", color = Cyan)
+                    }
                     Text("Hands-free wake phrase", color = Cyan, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -547,6 +553,32 @@ private fun runAssistantRequest(
     AssistantServices.saveMessage(context, "user", prompt)
     clearPrompt()
     val lower = prompt.lowercase(Locale.ROOT)
+    when {
+        lower == "stop agent" || lower == "stop phone agent" || lower == "cancel agent" -> {
+            context.sendBroadcast(Intent(PhoneAgentController.ACTION_RUN_TASK).setPackage(context.packageName).putExtra("stop", true))
+            val answer = "I'll stop the current phone-agent task if one is running."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        lower.startsWith("agent ") || lower.startsWith("use screen to ") || lower.startsWith("use my phone to ") -> {
+            val goal = when {
+                lower.startsWith("agent ") -> prompt.trim().substringAfter(" ", "").trim()
+                lower.startsWith("use screen to ") -> prompt.trim().substringAfter("use screen to ", "").trim()
+                else -> prompt.trim().substringAfter("use my phone to ", "").trim()
+            }
+            val answer = when {
+                goal.isBlank() -> "Tell me what you want me to do on your phone. For example: agent open YouTube and search for jazz."
+                !PhoneAgentController.isEnabled(context) -> {
+                    PhoneAgentController.request(context, goal)
+                    PhoneAgentController.openAccessibilitySettings(context)
+                    "To control apps, enable Munch phone agent in Android Accessibility settings. Then return to Munch and repeat your command. Screen content may be sent to Groq to plan actions."
+                }
+                PhoneAgentController.request(context, goal) -> "Starting the phone agent. I'll inspect the screen, perform steps, and verify the result."
+                else -> "I won't automate that request because it may involve a sensitive action such as payment, purchase, credentials, or deleting data."
+            }
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
     when {
         Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val match = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
