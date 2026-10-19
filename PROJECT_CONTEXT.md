@@ -130,3 +130,12 @@
 - Task limit: 8 actions; waits about 1.1 seconds between actions; uses the existing Groq model `openai/gpt-oss-20b`. The agent verifies via a fresh screen observation but cannot guarantee success for all apps or screens.
 - Important limitation: the code has been committed to a feature branch and PR opened, but CI build/tests and physical-device testing are not yet verified. Do not distribute an APK until CI succeeds, the artifact is inspected, and real-device tests are performed.
 - Next: check PR checks, fix compile/test failures, build and inspect APK, then test Accessibility permission, task execution, cancellation, and screen-on behavior on device.
+
+
+## Second Brain implementation (2026-10-19)
+- Added `SecondBrainStore.kt`: local SQLite storage for notes/memories with title, content, source, tags, timestamps, search, recent list, delete, and bounded context retrieval. Data persists across app restarts and is separate from chat history.
+- Added a Second Brain home shortcut and UI to save notes, search/review recent memories, and delete individual entries.
+- Added voice/text commands: `remember <note>`, `save memory <note>`, `search memory <query>`, `what do you remember about <topic>`, and `find in memory <query>`.
+- Groq chat prompts and phone-agent planning now retrieve matching memory excerpts; only relevant excerpts are included in the online request. UI discloses that relevant excerpts may be sent to Groq. Memory text is context, not instructions.
+- Current scope is the first functional layer: manual/voice capture, local keyword search, retrieval-augmented Groq context, and agent context. Not yet implemented: automatic conversation ingestion, document/file import, LLM-maintained linked Markdown wiki, semantic embeddings, contradiction detection, export/import, and scheduled proactive briefings.
+- Build/test status for this change: pending CI verification. Do not provide an APK until GitHub Actions completes successfully; still needs real-device UI and memory retrieval testing.
