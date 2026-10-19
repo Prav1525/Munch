@@ -378,7 +378,7 @@ private fun MunchHome(activity: MainActivity) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Text("SECOND BRAIN", color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                                Text("\${SecondBrainStore.count(context)} memories stored on this device", color = Soft, fontSize = 11.sp)
+                                Text("${SecondBrainStore.count(context)} memories stored on this device", color = Soft, fontSize = 11.sp)
                             }
                             TextButton(onClick = { showSecondBrain = false }) { Text("CLOSE", color = Cyan) }
                         }
@@ -395,7 +395,7 @@ private fun MunchHome(activity: MainActivity) {
                             Button(onClick = { brainQuery = ""; brainResults.clear(); brainResults.addAll(SecondBrainStore.recent(context, 20)) }, colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) { Text("Recent", color = Cyan) }
                         }
                         OutlinedTextField(value = brainQuery, onValueChange = { brainQuery = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Search your memories") }, singleLine = true)
-                        Button(onClick = { brainResults.clear(); brainResults.addAll(SecondBrainStore.search(context, brainQuery, 30)); statusText = "Found \${brainResults.size} matching memories" }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) { Text("Search memory", color = Cyan) }
+                        Button(onClick = { brainResults.clear(); brainResults.addAll(SecondBrainStore.search(context, brainQuery, 30)); statusText = "Found ${brainResults.size} matching memories" }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) { Text("Search memory", color = Cyan) }
                         if (brainResults.isEmpty()) Text("No memories yet. Save a note above, or try a different search.", color = Soft, fontSize = 12.sp)
                         brainResults.forEach { memory ->
                             Column(Modifier.fillMaxWidth().border(1.dp, Hairline, RoundedCornerShape(12.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -404,7 +404,7 @@ private fun MunchHome(activity: MainActivity) {
                                     TextButton(onClick = { SecondBrainStore.delete(context, memory.id); brainResults.remove(memory); statusText = "Memory deleted" }) { Text("DELETE", color = Soft, fontSize = 10.sp) }
                                 }
                                 Text(memory.content, color = White, fontSize = 12.sp, lineHeight = 17.sp)
-                                Text("Source: \${memory.source}", color = Soft, fontSize = 10.sp)
+                                Text("Source: ${memory.source}", color = Soft, fontSize = 10.sp)
                             }
                         }
                         Text("Stored locally on this phone. Relevant excerpts may be sent to Groq when you ask a question online.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
@@ -634,7 +634,7 @@ private fun runAssistantRequest(
             val query = prompt.trim().replaceFirst(Regex("^(search memory for?|what do you remember about|find in memory)\\s+", RegexOption.IGNORE_CASE), "").trim()
             val matches = SecondBrainStore.search(context, query, 5)
             val answer = if (matches.isEmpty()) "I couldn't find a matching memory. Try saving a note in Second brain first."
-                else "I found \${matches.size} memories: " + matches.joinToString(". ") { "\${it.title}: \${it.content.take(220)}" }
+                else "I found ${matches.size} memories: " + matches.joinToString(". ") { "${it.title}: ${it.content.take(220)}" }
             messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
             setStatus(answer); activity.speak(answer)
         }
