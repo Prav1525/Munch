@@ -26,8 +26,12 @@ object PhoneAgentController {
     fun request(context: Context, goal: String): Boolean {
         val clean = goal.trim().take(500)
         if (clean.isBlank() || isHighRisk(clean)) return false
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(PENDING, clean).apply()
-        if (!isEnabled(context)) return false
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!isEnabled(context)) {
+            prefs.edit().putString(PENDING, clean).apply()
+            return false
+        }
+        prefs.edit().remove(PENDING).apply()
         context.sendBroadcast(Intent(ACTION_RUN_TASK).setPackage(context.packageName).putExtra("goal", clean))
         return true
     }
