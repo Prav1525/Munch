@@ -631,7 +631,7 @@ private fun runAssistantRequest(
             }
         }
         lower.startsWith("search memory ") || lower.startsWith("what do you remember about ") || lower.startsWith("find in memory ") -> {
-            val query = prompt.trim().replaceFirst(Regex("^(search memory for?|what do you remember about|find in memory)\\s+", RegexOption.IGNORE_CASE), "").trim()
+            val query = prompt.trim().replaceFirst(Regex("^(search memory(?: for)?|what do you remember about|find in memory)\\s+", RegexOption.IGNORE_CASE), "").trim()
             val matches = SecondBrainStore.search(context, query, 5)
             val answer = if (matches.isEmpty()) "I couldn't find a matching memory. Try saving a note in Second brain first."
                 else "I found ${matches.size} memories: " + matches.joinToString(". ") { "${it.title}: ${it.content.take(220)}" }
