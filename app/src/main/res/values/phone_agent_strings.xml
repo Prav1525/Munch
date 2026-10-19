@@ -1,0 +1,3 @@
+<resources>
+    <string name="phone_agent_accessibility_description">Allows Munch to inspect visible app controls and perform user-requested screen actions. Munch uses this only when you explicitly start a phone-agent task.</string>
+</resources>
