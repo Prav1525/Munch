@@ -611,7 +611,7 @@ private fun runAssistantRequest(
             setStatus(answer); activity.speak(answer)
         }
         lower.startsWith("remember ") || lower.startsWith("save memory ") -> {
-            val note = prompt.trim().replaceFirst(Regex("^(remember|save memory)\\\\s+", RegexOption.IGNORE_CASE), "").trim()
+            val note = prompt.trim().replaceFirst(Regex("^(remember|save memory)\\s+", RegexOption.IGNORE_CASE), "").trim()
             if (note.isBlank()) {
                 val answer = "Tell me what you want me to remember."
                 messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
@@ -631,7 +631,7 @@ private fun runAssistantRequest(
             }
         }
         lower.startsWith("search memory ") || lower.startsWith("what do you remember about ") || lower.startsWith("find in memory ") -> {
-            val query = prompt.trim().replaceFirst(Regex("^(search memory for?|what do you remember about|find in memory)\\\\s+", RegexOption.IGNORE_CASE), "").trim()
+            val query = prompt.trim().replaceFirst(Regex("^(search memory for?|what do you remember about|find in memory)\\s+", RegexOption.IGNORE_CASE), "").trim()
             val matches = SecondBrainStore.search(context, query, 5)
             val answer = if (matches.isEmpty()) "I couldn't find a matching memory. Try saving a note in Second brain first."
                 else "I found \${matches.size} memories: " + matches.joinToString(". ") { "\${it.title}: \${it.content.take(220)}" }
