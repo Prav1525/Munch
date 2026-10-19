@@ -56,7 +56,6 @@ class PhoneAgentService : AccessibilityService() {
         createChannel()
         tts = TextToSpeech(this) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale.UK }
         ContextCompat.registerReceiver(this, receiver, IntentFilter(PhoneAgentController.ACTION_RUN_TASK), ContextCompat.RECEIVER_NOT_EXPORTED)
-        PhoneAgentController.takePendingGoal(this)?.let { startTask(it) }
         notifyStatus("Munch phone agent ready", "Waiting for a task you explicitly request")
     }
 
