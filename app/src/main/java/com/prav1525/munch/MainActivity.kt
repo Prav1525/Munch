@@ -571,7 +571,7 @@ private fun runAssistantRequest(
                 !PhoneAgentController.isEnabled(context) -> {
                     PhoneAgentController.request(context, goal)
                     PhoneAgentController.openAccessibilitySettings(context)
-                    "To control apps, enable Munch phone agent in Android Accessibility settings. Then return to Munch and repeat your command. Screen content may be sent to Groq to plan actions."
+                    "To control apps, enable Munch phone agent in Android Accessibility settings. Return to Munch and repeat your command to start it. Visible screen text may be sent to Groq to plan actions."
                 }
                 PhoneAgentController.request(context, goal) -> "Starting the phone agent. I'll inspect the screen, perform steps, and verify the result."
                 else -> "I won't automate that request because it may involve a sensitive action such as payment, purchase, credentials, or deleting data."
