@@ -43,7 +43,11 @@ object SecondBrainStore {
         val updatedAt: Long
     )
 
-    private fun db(context: Context) = BrainDb(context.applicationContext)
+    @Volatile private var helper: BrainDb? = null
+
+    private fun db(context: Context): BrainDb = synchronized(this) {
+        helper ?: BrainDb(context.applicationContext).also { helper = it }
+    }
 
     fun save(context: Context, title: String, content: String, source: String = "note", tags: String = ""): Long {
         val cleanTitle = title.trim().ifBlank { content.trim().lineSequence().firstOrNull().orEmpty().take(80).ifBlank { "Untitled memory" } }
