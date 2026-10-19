@@ -167,6 +167,11 @@ private fun MunchHome(activity: MainActivity) {
     var showConversation by remember { mutableStateOf(false) }
     var showMapDialog by remember { mutableStateOf(false) }
     var showReminderDialog by remember { mutableStateOf(false) }
+    var showSecondBrain by remember { mutableStateOf(false) }
+    var brainTitle by remember { mutableStateOf("") }
+    var brainContent by remember { mutableStateOf("") }
+    var brainQuery by remember { mutableStateOf("") }
+    val brainResults = remember { mutableStateListOf<SecondBrainStore.Memory>().apply { addAll(SecondBrainStore.recent(context, 20)) } }
     var destination by remember { mutableStateOf("") }
     var reminderText by remember { mutableStateOf("") }
     var reminderMinutes by remember { mutableStateOf("10") }
@@ -331,6 +336,11 @@ private fun MunchHome(activity: MainActivity) {
                     ShortcutCard("⌁", "Get somewhere", "Routes & places", Modifier.weight(1f)) { showMapDialog = true }
                     ShortcutCard("◷", "My day", "Plans & reminders", Modifier.weight(1f)) { showReminderDialog = true }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    ShortcutCard("◎", "Second brain", "Remember & search", Modifier.fillMaxWidth()) {
+                        brainResults.clear(); brainResults.addAll(SecondBrainStore.recent(context, 20)); showSecondBrain = true
+                    }
+                }
             }
 
             if (showConversation) {
@@ -358,6 +368,46 @@ private fun MunchHome(activity: MainActivity) {
                                 Text(if (busy) "Thinking…" else "Send")
                             }
                         }
+                    }
+                }
+            }
+
+            if (showSecondBrain) {
+                Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, Hairline)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("SECOND BRAIN", color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Text("${SecondBrainStore.count(context)} memories stored on this device", color = Soft, fontSize = 11.sp)
+                            }
+                            TextButton(onClick = { showSecondBrain = false }) { Text("CLOSE", color = Cyan) }
+                        }
+                        OutlinedTextField(value = brainTitle, onValueChange = { brainTitle = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Title (optional)") }, singleLine = true)
+                        OutlinedTextField(value = brainContent, onValueChange = { brainContent = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Save a note, decision, or idea") }, minLines = 3)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                if (brainContent.isNotBlank()) {
+                                    runCatching { SecondBrainStore.save(context, brainTitle, brainContent, "manual") }
+                                        .onSuccess { brainTitle = ""; brainContent = ""; brainResults.clear(); brainResults.addAll(SecondBrainStore.recent(context, 20)); statusText = "Saved to your local second brain" }
+                                        .onFailure { statusText = it.message ?: "Could not save memory" }
+                                }
+                            }, enabled = brainContent.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Void)) { Text("Save memory") }
+                            Button(onClick = { brainQuery = ""; brainResults.clear(); brainResults.addAll(SecondBrainStore.recent(context, 20)) }, colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) { Text("Recent", color = Cyan) }
+                        }
+                        OutlinedTextField(value = brainQuery, onValueChange = { brainQuery = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Search your memories") }, singleLine = true)
+                        Button(onClick = { brainResults.clear(); brainResults.addAll(SecondBrainStore.search(context, brainQuery, 30)); statusText = "Found ${brainResults.size} matching memories" }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) { Text("Search memory", color = Cyan) }
+                        if (brainResults.isEmpty()) Text("No memories yet. Save a note above, or try a different search.", color = Soft, fontSize = 12.sp)
+                        brainResults.forEach { memory ->
+                            Column(Modifier.fillMaxWidth().border(1.dp, Hairline, RoundedCornerShape(12.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(memory.title, color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { SecondBrainStore.delete(context, memory.id); brainResults.remove(memory); statusText = "Memory deleted" }) { Text("DELETE", color = Soft, fontSize = 10.sp) }
+                                }
+                                Text(memory.content, color = White, fontSize = 12.sp, lineHeight = 17.sp)
+                                Text("Source: ${memory.source}", color = Soft, fontSize = 10.sp)
+                            }
+                        }
+                        Text("Stored locally on this phone. Relevant excerpts may be sent to Groq when you ask a question online.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
                     }
                 }
             }
@@ -403,6 +453,12 @@ private fun MunchHome(activity: MainActivity) {
                             onlineFallbackEnabled = it
                             AssistantServices.setGroqFallbackEnabled(context, it)
                         })
+                    }
+                    Text("Phone agent", color = Cyan, fontWeight = FontWeight.SemiBold)
+                    Text("Let Munch inspect visible app controls and perform a bounded sequence of taps, typing, scrolling and navigation for tasks you explicitly request. Screen text is sent to Groq for planning. Do not use it for payments, purchases, credentials or destructive actions.", color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+                    Button(onClick = { PhoneAgentController.openAccessibilitySettings(context) }, modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceLift)) {
+                        Text(if (PhoneAgentController.isEnabled(context)) "PHONE AGENT ENABLED · ACCESSIBILITY SETTINGS" else "ENABLE PHONE AGENT", color = Cyan)
                     }
                     Text("Hands-free wake phrase", color = Cyan, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -548,6 +604,59 @@ private fun runAssistantRequest(
     clearPrompt()
     val lower = prompt.lowercase(Locale.ROOT)
     when {
+        lower == "stop agent" || lower == "stop phone agent" || lower == "cancel agent" -> {
+            context.sendBroadcast(Intent(PhoneAgentController.ACTION_RUN_TASK).setPackage(context.packageName).putExtra("stop", true))
+            val answer = "I'll stop the current phone-agent task if one is running."
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        lower.startsWith("remember ") || lower.startsWith("save memory ") -> {
+            val note = prompt.trim().replaceFirst(Regex("^(remember|save memory)\\s+", RegexOption.IGNORE_CASE), "").trim()
+            if (note.isBlank()) {
+                val answer = "Tell me what you want me to remember."
+                messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                setStatus(answer); activity.speak(answer)
+            } else {
+                runCatching { SecondBrainStore.save(context, "", note, "voice") }
+                    .onSuccess {
+                        val answer = "Saved that to your second brain."
+                        messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                        setStatus(answer); activity.speak(answer)
+                    }
+                    .onFailure {
+                        val answer = "I couldn't save that memory."
+                        messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+                        setStatus(answer); activity.speak(answer)
+                    }
+            }
+        }
+        lower.startsWith("search memory ") || lower.startsWith("what do you remember about ") || lower.startsWith("find in memory ") -> {
+            val query = prompt.trim().replaceFirst(Regex("^(search memory(?: for)?|what do you remember about|find in memory)\\s+", RegexOption.IGNORE_CASE), "").trim()
+            val matches = SecondBrainStore.search(context, query, 5)
+            val answer = if (matches.isEmpty()) "I couldn't find a matching memory. Try saving a note in Second brain first."
+                else "I found ${matches.size} memories: " + matches.joinToString(". ") { "${it.title}: ${it.content.take(220)}" }
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
+        lower.startsWith("agent ") || lower.startsWith("use screen to ") || lower.startsWith("use my phone to ") -> {
+            val goal = when {
+                lower.startsWith("agent ") -> prompt.trim().substringAfter(" ", "").trim()
+                lower.startsWith("use screen to ") -> prompt.trim().substringAfter("use screen to ", "").trim()
+                else -> prompt.trim().substringAfter("use my phone to ", "").trim()
+            }
+            val answer = when {
+                goal.isBlank() -> "Tell me what you want me to do on your phone. For example: agent open YouTube and search for jazz."
+                !PhoneAgentController.isEnabled(context) -> {
+                    PhoneAgentController.request(context, goal)
+                    PhoneAgentController.openAccessibilitySettings(context)
+                    "To control apps, enable Munch phone agent in Android Accessibility settings. Return to Munch and repeat your command to start it. Visible screen text may be sent to Groq to plan actions."
+                }
+                PhoneAgentController.request(context, goal) -> "Starting the phone agent. I'll inspect the screen, perform steps, and verify the result."
+                else -> "I won't automate that request because it may involve a sensitive action such as payment, purchase, credentials, or deleting data."
+            }
+            messages.add(ChatLine("assistant", answer)); AssistantServices.saveMessage(context, "assistant", answer)
+            setStatus(answer); activity.speak(answer)
+        }
         Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matches(prompt.trim()) -> {
             val match = Regex("^(?:please\\s+)?(?:open|launch|start)\\s+(?:youtube|you tube|yt)(?:\\s+and\\s+(?:play|search(?:\\s+for)?)\\s+(.+))?[.! ]*$", RegexOption.IGNORE_CASE).matchEntire(prompt.trim())!!
             val requestedSong = match.groupValues.getOrElse(1) { "" }.trim().trimEnd('.', '!', '?')
